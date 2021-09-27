@@ -26,8 +26,9 @@
  *
  * =======================================================================
  */
-import { Sys_Milliseconds } from "../common/clientserver"
-import { keydest_t } from "./client";
+import { Com_Printf, Sys_Milliseconds } from "../common/clientserver"
+import { Cbuf_AddText, Cmd_AddCommand } from "../common/cmdparser";
+import { connstate_t, keydest_t } from "./client";
 import { cls } from "./cl_main";
 import { M_Keydown } from "./menu/menu"
 
@@ -44,7 +45,7 @@ export enum QKEYS {
 	// Note: ASCII keys are generally valid but don't get constants here,
 	// just use 'a' (yes, lowercase) or '2' or whatever, however there are
 	// some special cases when writing/parsing configs (space or quotes or
-	// also ; and $ have a special meaning there so we use e.g. "SPACE" instead),
+	// also ; and $ have a special meaning there so we use e.g. "SPACE" instead", keynum: QKEYS.K_SC_ },
 	// see keynames[] in cl_keyboard.c
 	K_SPACE = 32,
 
@@ -294,7 +295,7 @@ export enum QKEYS {
 
 // char key_lines[NUM_KEY_LINES][MAXCMDLINE];
 let key_linepos = 0
-let anykeydown = 0
+export let anykeydown = 0
 
 let edit_line = 0;
 let history_line = 0;
@@ -314,13 +315,94 @@ interface QKeyEvent {
 let keyEvents: QKeyEvent[] = []
 
 function keydownEventHandler (event: KeyboardEvent) {
-    console.log(event);
     keyEvents.push({ event: event, down: true})
 }
 
 function keyupEventHandler (event: KeyboardEvent) {
     keyEvents.push({ event: event, down: false})
 }
+
+/*
+ * Returns a key number to be used to index
+ * keybindings[] by looking at the given string.
+ * Single ascii characters return themselves, while
+ * the K_* names are matched up.
+ */
+function Key_StringToKeynum(str: string): number {
+
+	if (!str) {
+		return -1;
+	}
+
+	if (str.length == 1) {
+		return str.charCodeAt(0);
+	}
+
+	for (let kn of keynames)
+	{
+		if (str == kn.name) {
+			return kn.keynum;
+		}
+	}
+
+	return -1;
+}
+
+function Key_SetBinding(keynum: number, binding: string) {
+	if (keynum == -1) {
+		return;
+	}
+	keybindings[keynum] = binding;
+}
+
+
+async function Key_Bind_f(args: string[]) {
+
+	if (args.length < 2) {
+		Com_Printf("bind <key> [command] : attach a command to a key\n");
+		return;
+	}
+
+	let b = Key_StringToKeynum(args[1]);
+	if (b == -1) {
+		Com_Printf(`"${args[1]}" isn't a valid key\n`);
+		return;
+	}
+
+	/* don't allow binding escape or the special console keys */
+	if (b == QKEYS.K_ESCAPE || b == '^'.charCodeAt(0) || b == '`'.charCodeAt(0) || b == '~'.charCodeAt(0) || b == QKEYS.K_JOY_BACK) {
+		// if(doneWithDefaultCfg) {
+		/* don't warn about this when it's from default.cfg, we can't change that anyway */
+		Com_Printf(`You can't bind the special key "${args[1]}"!\n`);
+		// }
+		return;
+	}
+
+	if (args.length == 2) {
+		if (keybindings[b]) {
+			Com_Printf(`"${args[1]}" = "${keybindings[b]}"\n`);
+		} else {
+			Com_Printf(`"${args[1]}" is not bound\n`);
+		}
+
+		return;
+	}
+
+	/* copy the rest of the command line */
+	let cmd = ""; /* start out with a null string */
+
+	for (let i = 2; i < args.length; i++)
+	{
+		cmd += args[i];
+
+		if (i != (args.length - 1)) {
+			cmd += " ";
+		}
+	}
+
+	Key_SetBinding(b, cmd);
+}
+
 
 export function Key_Init() {
 	// int i;
@@ -386,7 +468,7 @@ export function Key_Init() {
 	// cfg_unbindall = Cvar_Get("cfg_unbindall", "1", CVAR_ARCHIVE);
 
 	// /* register our functions */
-	// Cmd_AddCommand("bind", Key_Bind_f);
+	Cmd_AddCommand("bind", Key_Bind_f);
 	// Cmd_AddCommand("unbind", Key_Unbind_f);
 	// Cmd_AddCommand("unbindall", Key_Unbindall_f);
 	// Cmd_AddCommand("bindlist", Key_Bindlist_f);
@@ -398,10 +480,31 @@ export function Key_Init() {
 function convertKeyCode(event: KeyboardEvent): number {
     if (event.code == "ArrowDown") return QKEYS.K_DOWNARROW;
     if (event.code == "ArrowUp") return QKEYS.K_UPARROW;
+    if (event.code == "ArrowLeft") return QKEYS.K_LEFTARROW;
+    if (event.code == "ArrowRight") return QKEYS.K_RIGHTARROW;
     if (event.code == "Enter") return QKEYS.K_ENTER;
     if (event.code == "Escape") return QKEYS.K_ESCAPE;
     if (event.code == "Space") return QKEYS.K_SPACE;
-    if (event.code >= "a" && event.code <= "z") return event.code.charCodeAt(0);
+    if (event.code == "ControlLeft") return QKEYS.K_CTRL;
+    if (event.code == "AltLeft") return QKEYS.K_ALT;
+    if (event.code == "AltRight") return QKEYS.K_ALT;
+    if (event.code == "ShiftLeft") return QKEYS.K_SHIFT;
+    if (event.code == "ShiftRight") return QKEYS.K_SHIFT;
+    if (event.code == "F1") return QKEYS.K_F1;
+    if (event.code == "F2") return QKEYS.K_F2;
+    if (event.code == "F3") return QKEYS.K_F3;
+    if (event.code == "F4") return QKEYS.K_F4;
+    if (event.code == "F5") return QKEYS.K_F5;
+    if (event.code == "F6") return QKEYS.K_F6;
+    if (event.code == "F7") return QKEYS.K_F7;
+    if (event.code == "F8") return QKEYS.K_F8;
+    if (event.code == "F9") return QKEYS.K_F9;
+    if (event.code == "F10") return QKEYS.K_F10;
+    if (event.code == "F11") return QKEYS.K_F11;
+    if (event.code == "F12") return QKEYS.K_F12;
+    if (event.key >= "a" && event.key <= "z") return event.code.charCodeAt(0);
+    if (event.key >= "0" && event.key <= "9") return event.code.charCodeAt(0);
+    console.log("Unknown key", event);
     return -1
 }
 
@@ -428,7 +531,6 @@ async function Key_Event(key: number, down: boolean) {
 	// cvar_t *fullscreen;
 	let time = Sys_Milliseconds();
 
-    console.log(key, down)
     if (key < 0) return
 
 	// // evil hack for the joystick key altselector, which turns K_JOYx into K_JOYx_ALT
@@ -507,7 +609,7 @@ async function Key_Event(key: number, down: boolean) {
 	// if ((key >= K_MOUSE1 && key != K_JOY_BACK) && !keybindings[key] && (cls.key_dest != key_console) &&
 	// 	(cls.state == ca_active))
 	// {
-	// 	Com_Printf("%s (%d) is unbound, hit F4 to set.\n", Key_KeynumToString(key), key);
+	// 	Com_Printf("%s (%d) is unbound, hit F4 to set.\n", Key_KeynumToString(key", keynum: QKEYS.K_SC_ }, key);
 	// }
 
 	// /* While in attract loop all keys besides F1 to F12 (to
@@ -610,43 +712,37 @@ async function Key_Event(key: number, down: boolean) {
 	   started before a console switch. Button commands include the
 	   kenum as a parameter, so multiple downs can be matched with ups */
 	if (!down) {
-	// 	kb = keybindings[key];
+		let kb = keybindings[key];
 
-	// 	if (kb && (kb[0] == '+'))
-	// 	{
-	// 		Com_sprintf(cmd, sizeof(cmd), "-%s %i %i\n", kb + 1, key, time);
-	// 		Cbuf_AddText(cmd);
-	// 	}
+		if (kb && (kb[0] == '+')) {
+			let cmd = `-${kb.substr(1)} ${key} ${time}\n`
+			Cbuf_AddText(cmd);
+		}
+
+		return;
+	}  else if (((cls.key_dest == keydest_t.key_menu) && menubound[key]) ||
+			((cls.key_dest == keydest_t.key_console) && !consolekeys[key]) ||
+			((cls.key_dest == keydest_t.key_game) && ((cls.state == connstate_t.ca_active) ||
+			  !consolekeys[key])))
+	{
+		let kb = keybindings[key];
+
+		if (kb) {
+			if (kb[0] == '+') {
+				/* button commands add keynum and time as a parm */
+				let cmd = `${kb} ${key} ${time}\n`
+				Cbuf_AddText(cmd);
+			} else {
+				Cbuf_AddText(kb);
+				Cbuf_AddText("\n");
+			}
+		}
 
 		return;
 	}
-	// else if (((cls.key_dest == key_menu) && menubound[key]) ||
-	// 		((cls.key_dest == key_console) && !consolekeys[key]) ||
-	// 		((cls.key_dest == key_game) && ((cls.state == ca_active) ||
-	// 		  !consolekeys[key])))
-	// {
-	// 	kb = keybindings[key];
 
-	// 	if (kb)
-	// 	{
-	// 		if (kb[0] == '+')
-	// 		{
-	// 			/* button commands add keynum and time as a parm */
-	// 			Com_sprintf(cmd, sizeof(cmd), "%s %i %i\n", kb, key, time);
-	// 			Cbuf_AddText(cmd);
-	// 		}
-	// 		else
-	// 		{
-	// 			Cbuf_AddText(kb);
-	// 			Cbuf_AddText("\n");
-	// 		}
-	// 	}
-
-	// 	return;
-	// }
-
-	// /* All input subsystems handled after this point only
-	//    care for key down events (=> if(!down) returns above). */
+	/* All input subsystems handled after this point only
+	   care for key down events (=> if(!down) returns above). */
 
 	// /* Everything that's not a special char
 	//    is processed by Char_Event(). */
@@ -675,3 +771,237 @@ async function Key_Event(key: number, down: boolean) {
 	// 		break;
 	}
 }
+
+
+interface keyname_t {
+	name: string
+	keynum: number
+}
+
+/* Translates internal key representations
+ * into human readable strings. */
+const keynames = [
+	{ name: "TAB", keynum: QKEYS.K_TAB},
+	{ name: "ENTER", keynum: QKEYS.K_ENTER},
+	{ name: "ESCAPE", keynum: QKEYS.K_ESCAPE},
+	{ name: "SPACE", keynum: QKEYS.K_SPACE},
+	{ name: "SEMICOLON", keynum: ';'.charCodeAt(0)},   /* because a raw semicolon separates commands */
+	{ name: "DOUBLEQUOTE", keynum: '"'.charCodeAt(0)}, /* because "" has special meaning in configs */
+	{ name: "QUOTE", keynum: '\'' .charCodeAt(0)},     /* just to be sure */
+	{ name: "DOLLAR", keynum: '$'.charCodeAt(0)},     /* $ is used in macros => can occur in configs */
+	{ name: "BACKSPACE", keynum: QKEYS.K_BACKSPACE},
+
+	{ name: "COMMAND", keynum: QKEYS.K_COMMAND},
+	{ name: "CAPSLOCK", keynum: QKEYS.K_CAPSLOCK},
+	{ name: "POWER", keynum: QKEYS.K_POWER},
+	{ name: "PAUSE", keynum: QKEYS.K_PAUSE},
+
+	{ name: "UPARROW", keynum: QKEYS.K_UPARROW},
+	{ name: "DOWNARROW", keynum: QKEYS.K_DOWNARROW},
+	{ name: "LEFTARROW", keynum: QKEYS.K_LEFTARROW},
+	{ name: "RIGHTARROW", keynum: QKEYS.K_RIGHTARROW},
+
+	{ name: "ALT", keynum: QKEYS.K_ALT},
+	{ name: "CTRL", keynum: QKEYS.K_CTRL},
+	{ name: "SHIFT", keynum: QKEYS.K_SHIFT},
+
+	{ name: "INS", keynum: QKEYS.K_INS},
+	{ name: "DEL", keynum: QKEYS.K_DEL},
+	{ name: "PGDN", keynum: QKEYS.K_PGDN},
+	{ name: "PGUP", keynum: QKEYS.K_PGUP},
+	{ name: "HOME", keynum: QKEYS.K_HOME},
+	{ name: "END", keynum: QKEYS.K_END},
+
+	{ name: "F1", keynum: QKEYS.K_F1},
+	{ name: "F2", keynum: QKEYS.K_F2},
+	{ name: "F3", keynum: QKEYS.K_F3},
+	{ name: "F4", keynum: QKEYS.K_F4},
+	{ name: "F5", keynum: QKEYS.K_F5},
+	{ name: "F6", keynum: QKEYS.K_F6},
+	{ name: "F7", keynum: QKEYS.K_F7},
+	{ name: "F8", keynum: QKEYS.K_F8},
+	{ name: "F9", keynum: QKEYS.K_F9},
+	{ name: "F10", keynum: QKEYS.K_F10},
+	{ name: "F11", keynum: QKEYS.K_F11},
+	{ name: "F12", keynum: QKEYS.K_F12},
+	{ name: "F13", keynum: QKEYS.K_F13},
+	{ name: "F14", keynum: QKEYS.K_F14},
+	{ name: "F15", keynum: QKEYS.K_F15},
+
+	{ name: "KP_HOME", keynum: QKEYS.K_KP_HOME},
+	{ name: "KP_UPARROW", keynum: QKEYS.K_KP_UPARROW},
+	{ name: "KP_PGUP", keynum: QKEYS.K_KP_PGUP},
+	{ name: "KP_LEFTARROW", keynum: QKEYS.K_KP_LEFTARROW},
+	{ name: "KP_5", keynum: QKEYS.K_KP_5},
+	{ name: "KP_RIGHTARROW", keynum: QKEYS.K_KP_RIGHTARROW},
+	{ name: "KP_END", keynum: QKEYS.K_KP_END},
+	{ name: "KP_DOWNARROW", keynum: QKEYS.K_KP_DOWNARROW},
+	{ name: "KP_PGDN", keynum: QKEYS.K_KP_PGDN},
+	{ name: "KP_ENTER", keynum: QKEYS.K_KP_ENTER},
+	{ name: "KP_INS", keynum: QKEYS.K_KP_INS},
+	{ name: "KP_DEL", keynum: QKEYS.K_KP_DEL},
+	{ name: "KP_SLASH", keynum: QKEYS.K_KP_SLASH},
+	{ name: "KP_MINUS", keynum: QKEYS.K_KP_MINUS},
+	{ name: "KP_PLUS", keynum: QKEYS.K_KP_PLUS},
+	{ name: "KP_NUMLOCK", keynum: QKEYS.K_KP_NUMLOCK},
+	{ name: "KP_STAR", keynum: QKEYS.K_KP_STAR},
+	{ name: "KP_EQUALS", keynum: QKEYS.K_KP_EQUALS},
+
+	{ name: "MOUSE1", keynum: QKEYS.K_MOUSE1},
+	{ name: "MOUSE2", keynum: QKEYS.K_MOUSE2},
+	{ name: "MOUSE3", keynum: QKEYS.K_MOUSE3},
+	{ name: "MOUSE4", keynum: QKEYS.K_MOUSE4},
+	{ name: "MOUSE5", keynum: QKEYS.K_MOUSE5},
+
+	{ name: "MWHEELUP", keynum: QKEYS.K_MWHEELUP},
+	{ name: "MWHEELDOWN", keynum: QKEYS.K_MWHEELDOWN},
+
+	{ name: "JOY1", keynum: QKEYS.K_JOY1},
+	{ name: "JOY2", keynum: QKEYS.K_JOY2},
+	{ name: "JOY3", keynum: QKEYS.K_JOY3},
+	{ name: "JOY4", keynum: QKEYS.K_JOY4},
+	{ name: "JOY5", keynum: QKEYS.K_JOY5},
+	{ name: "JOY6", keynum: QKEYS.K_JOY6},
+	{ name: "JOY7", keynum: QKEYS.K_JOY7},
+	{ name: "JOY8", keynum: QKEYS.K_JOY8},
+	{ name: "JOY9", keynum: QKEYS.K_JOY9},
+	{ name: "JOY10", keynum: QKEYS.K_JOY10},
+	{ name: "JOY11", keynum: QKEYS.K_JOY11},
+	{ name: "JOY12", keynum: QKEYS.K_JOY12},
+	{ name: "JOY13", keynum: QKEYS.K_JOY13},
+	{ name: "JOY14", keynum: QKEYS.K_JOY14},
+	{ name: "JOY15", keynum: QKEYS.K_JOY15},
+	{ name: "JOY16", keynum: QKEYS.K_JOY16},
+	{ name: "JOY17", keynum: QKEYS.K_JOY17},
+	{ name: "JOY18", keynum: QKEYS.K_JOY18},
+	{ name: "JOY19", keynum: QKEYS.K_JOY19},
+	{ name: "JOY20", keynum: QKEYS.K_JOY20},
+	{ name: "JOY21", keynum: QKEYS.K_JOY21},
+	{ name: "JOY22", keynum: QKEYS.K_JOY22},
+	{ name: "JOY23", keynum: QKEYS.K_JOY23},
+	{ name: "JOY24", keynum: QKEYS.K_JOY24},
+	{ name: "JOY25", keynum: QKEYS.K_JOY25},
+	{ name: "JOY26", keynum: QKEYS.K_JOY26},
+	{ name: "JOY27", keynum: QKEYS.K_JOY27},
+	{ name: "JOY28", keynum: QKEYS.K_JOY28},
+	{ name: "JOY29", keynum: QKEYS.K_JOY29},
+	{ name: "JOY30", keynum: QKEYS.K_JOY30},
+	{ name: "JOY31", keynum: QKEYS.K_JOY31},
+	{ name: "JOY32", keynum: QKEYS.K_JOY32},
+
+	{ name: "HAT_UP", keynum: QKEYS.K_HAT_UP},
+	{ name: "HAT_RIGHT", keynum: QKEYS.K_HAT_RIGHT},
+	{ name: "HAT_DOWN", keynum: QKEYS.K_HAT_DOWN},
+	{ name: "HAT_LEFT", keynum: QKEYS.K_HAT_LEFT},
+
+	{ name: "TRIG_LEFT", keynum: QKEYS.K_TRIG_LEFT},
+	{ name: "TRIG_RIGHT", keynum: QKEYS.K_TRIG_RIGHT},
+
+	// virtual keys you get by pressing the corresponding normal joy key
+	// and the altselector key
+	{ name: "JOY1_ALT", keynum: QKEYS.K_JOY1_ALT},
+	{ name: "JOY2_ALT", keynum: QKEYS.K_JOY2_ALT},
+	{ name: "JOY3_ALT", keynum: QKEYS.K_JOY3_ALT},
+	{ name: "JOY4_ALT", keynum: QKEYS.K_JOY4_ALT},
+	{ name: "JOY5_ALT", keynum: QKEYS.K_JOY5_ALT},
+	{ name: "JOY6_ALT", keynum: QKEYS.K_JOY6_ALT},
+	{ name: "JOY7_ALT", keynum: QKEYS.K_JOY7_ALT},
+	{ name: "JOY8_ALT", keynum: QKEYS.K_JOY8_ALT},
+	{ name: "JOY9_ALT", keynum: QKEYS.K_JOY9_ALT},
+	{ name: "JOY10_ALT", keynum: QKEYS.K_JOY10_ALT},
+	{ name: "JOY11_ALT", keynum: QKEYS.K_JOY11_ALT},
+	{ name: "JOY12_ALT", keynum: QKEYS.K_JOY12_ALT},
+	{ name: "JOY13_ALT", keynum: QKEYS.K_JOY13_ALT},
+	{ name: "JOY14_ALT", keynum: QKEYS.K_JOY14_ALT},
+	{ name: "JOY15_ALT", keynum: QKEYS.K_JOY15_ALT},
+	{ name: "JOY16_ALT", keynum: QKEYS.K_JOY16_ALT},
+	{ name: "JOY17_ALT", keynum: QKEYS.K_JOY17_ALT},
+	{ name: "JOY18_ALT", keynum: QKEYS.K_JOY18_ALT},
+	{ name: "JOY19_ALT", keynum: QKEYS.K_JOY19_ALT},
+	{ name: "JOY20_ALT", keynum: QKEYS.K_JOY20_ALT},
+	{ name: "JOY21_ALT", keynum: QKEYS.K_JOY21_ALT},
+	{ name: "JOY22_ALT", keynum: QKEYS.K_JOY22_ALT},
+	{ name: "JOY23_ALT", keynum: QKEYS.K_JOY23_ALT},
+	{ name: "JOY24_ALT", keynum: QKEYS.K_JOY24_ALT},
+	{ name: "JOY25_ALT", keynum: QKEYS.K_JOY25_ALT},
+	{ name: "JOY26_ALT", keynum: QKEYS.K_JOY26_ALT},
+	{ name: "JOY27_ALT", keynum: QKEYS.K_JOY27_ALT},
+	{ name: "JOY28_ALT", keynum: QKEYS.K_JOY28_ALT},
+	{ name: "JOY29_ALT", keynum: QKEYS.K_JOY29_ALT},
+	{ name: "JOY30_ALT", keynum: QKEYS.K_JOY30_ALT},
+	{ name: "JOY31_ALT", keynum: QKEYS.K_JOY31_ALT},
+	{ name: "JOY32_ALT", keynum: QKEYS.K_JOY32_ALT},
+
+	{ name: "HAT_UP_ALT", keynum: QKEYS.K_HAT_UP_ALT},
+	{ name: "HAT_RIGHT_ALT", keynum: QKEYS.K_HAT_RIGHT_ALT},
+	{ name: "HAT_DOWN_ALT", keynum: QKEYS.K_HAT_DOWN_ALT},
+	{ name: "HAT_LEFT_ALT", keynum: QKEYS.K_HAT_LEFT_ALT},
+
+	{ name: "TRIG_LEFT", keynum: QKEYS.K_TRIG_LEFT_ALT},
+	{ name: "TRIG_RIGHT", keynum: QKEYS.K_TRIG_RIGHT_ALT},
+
+	{ name: "JOY_BACK", keynum: QKEYS.K_JOY_BACK},
+
+	{ name: "SUPER", keynum: QKEYS.K_SUPER},
+	{ name: "COMPOSE", keynum: QKEYS.K_COMPOSE},
+	{ name: "MODE", keynum: QKEYS.K_MODE},
+	{ name: "HELP", keynum: QKEYS.K_HELP},
+	{ name: "PRINT", keynum: QKEYS.K_PRINT},
+	{ name: "SYSREQ", keynum: QKEYS.K_SYSREQ},
+	{ name: "SCROLLOCK", keynum: QKEYS.K_SCROLLOCK},
+	{ name: "MENU", keynum: QKEYS.K_MENU},
+	{ name: "UNDO", keynum: QKEYS.K_UNDO},
+
+	{ name: "SC_A", keynum: QKEYS.K_SC_A },
+	{ name: "SC_B", keynum: QKEYS.K_SC_B },
+	{ name: "SC_C", keynum: QKEYS.K_SC_C },
+	{ name: "SC_D", keynum: QKEYS.K_SC_D },
+	{ name: "SC_E", keynum: QKEYS.K_SC_E },
+	{ name: "SC_F", keynum: QKEYS.K_SC_F },
+	{ name: "SC_G", keynum: QKEYS.K_SC_G },
+	{ name: "SC_H", keynum: QKEYS.K_SC_H },
+	{ name: "SC_I", keynum: QKEYS.K_SC_I },
+	{ name: "SC_J", keynum: QKEYS.K_SC_J },
+	{ name: "SC_K", keynum: QKEYS.K_SC_K },
+	{ name: "SC_L", keynum: QKEYS.K_SC_L },
+	{ name: "SC_M", keynum: QKEYS.K_SC_M },
+	{ name: "SC_N", keynum: QKEYS.K_SC_N },
+	{ name: "SC_O", keynum: QKEYS.K_SC_O },
+	{ name: "SC_P", keynum: QKEYS.K_SC_P },
+	{ name: "SC_Q", keynum: QKEYS.K_SC_Q },
+	{ name: "SC_R", keynum: QKEYS.K_SC_R },
+	{ name: "SC_S", keynum: QKEYS.K_SC_S },
+	{ name: "SC_T", keynum: QKEYS.K_SC_T },
+	{ name: "SC_U", keynum: QKEYS.K_SC_U },
+	{ name: "SC_V", keynum: QKEYS.K_SC_V },
+	{ name: "SC_W", keynum: QKEYS.K_SC_W },
+	{ name: "SC_X", keynum: QKEYS.K_SC_X },
+	{ name: "SC_Y", keynum: QKEYS.K_SC_Y },
+	{ name: "SC_Z", keynum: QKEYS.K_SC_Z },
+	{ name: "SC_MINUS", keynum: QKEYS.K_SC_MINUS },
+	{ name: "SC_EQUALS", keynum: QKEYS.K_SC_EQUALS },
+	{ name: "SC_LEFTBRACKET", keynum: QKEYS.K_SC_LEFTBRACKET },
+	{ name: "SC_RIGHTBRACKET", keynum: QKEYS.K_SC_RIGHTBRACKET },
+	{ name: "SC_BACKSLASH", keynum: QKEYS.K_SC_BACKSLASH },
+	{ name: "SC_NONUSHASH", keynum: QKEYS.K_SC_NONUSHASH },
+	{ name: "SC_SEMICOLON", keynum: QKEYS.K_SC_SEMICOLON },
+	{ name: "SC_APOSTROPHE", keynum: QKEYS.K_SC_APOSTROPHE },
+	{ name: "SC_GRAVE", keynum: QKEYS.K_SC_GRAVE }, // console key
+	{ name: "SC_COMMA", keynum: QKEYS.K_SC_COMMA },
+	{ name: "SC_PERIOD", keynum: QKEYS.K_SC_PERIOD },
+	{ name: "SC_SLASH", keynum: QKEYS.K_SC_SLASH },
+	{ name: "SC_NONUSBACKSLASH", keynum: QKEYS.K_SC_NONUSBACKSLASH },
+	{ name: "SC_INTERNATIONAL1", keynum: QKEYS.K_SC_INTERNATIONAL1 },
+	{ name: "SC_INTERNATIONAL2", keynum: QKEYS.K_SC_INTERNATIONAL2 },
+	{ name: "SC_INTERNATIONAL3", keynum: QKEYS.K_SC_INTERNATIONAL3 },
+	{ name: "SC_INTERNATIONAL4", keynum: QKEYS.K_SC_INTERNATIONAL4 },
+	{ name: "SC_INTERNATIONAL5", keynum: QKEYS.K_SC_INTERNATIONAL5 },
+	{ name: "SC_INTERNATIONAL6", keynum: QKEYS.K_SC_INTERNATIONAL6 },
+	{ name: "SC_INTERNATIONAL7", keynum: QKEYS.K_SC_INTERNATIONAL7 },
+	{ name: "SC_INTERNATIONAL8", keynum: QKEYS.K_SC_INTERNATIONAL8 },
+	{ name: "SC_INTERNATIONAL9", keynum: QKEYS.K_SC_INTERNATIONAL9 },
+	{ name: "SC_THOUSANDSSEPARATOR", keynum: QKEYS.K_SC_THOUSANDSSEPARATOR },
+	{ name: "SC_DECIMALSEPARATOR", keynum: QKEYS.K_SC_DECIMALSEPARATOR },
+	{ name: "SC_CURRENCYUNIT", keynum: QKEYS.K_SC_CURRENCYUNIT },
+	{ name: "SC_CURRENCYSUBUNIT", keynum: QKEYS.K_SC_CURRENCYSUBUNIT },
+];

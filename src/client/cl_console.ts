@@ -53,6 +53,12 @@ class console_t {
 
 export let con = new console_t()
 
+export function DrawStringScaled(x: number, y: number, s: string, factor: number) {
+	for (let i = 0; i < s.length; i++) {
+		Draw_CharScaled(x, y, s.charCodeAt(i), factor);
+		x += 8*factor;
+	}
+}
 
 /*
  * If the line width has changed, reformat the buffer.

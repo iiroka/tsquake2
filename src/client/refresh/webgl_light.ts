@@ -25,14 +25,72 @@
  * =======================================================================
  */
 
+import * as SHARED from "../../common/shared"
 import { Com_Error } from "../../common/clientserver";
 import { SURF_SKY, SURF_TRANS33, SURF_TRANS66, SURF_WARP } from "../../common/filesystem";
-import { ERR_DROP } from "../../common/shared";
-import { MAX_DLIGHTS } from "../ref";
+import { dlight_t, MAX_DLIGHTS } from "../ref";
 import { gl3_lms, MAX_LIGHTMAPS_PER_SURFACE } from "./webgl_lightmap";
-import { gl3state } from "./webgl_main";
-import { msurface_t } from "./webgl_model";
+import { gl3state, gl3_framecount, gl3_newrefdef, gl3_worldmodel } from "./webgl_main";
+import { mleaf_or_mode, mnode_t, msurface_t, SURF_PLANEBACK } from "./webgl_model";
 import { WebGL_UpdateUBOLights } from "./webgl_shaders";
+
+const DLIGHT_CUTOFF = 64
+
+let r_dlightframecount = 0
+
+// bit: 1 << i for light number i, will be or'ed into msurface_t::dlightbits if surface is affected by this light
+export function WebGL_MarkLights(light: dlight_t, bit: number, anode: mleaf_or_mode) {
+	// cplane_t *splitplane;
+	// float dist;
+	// msurface_t *surf;
+	// int i;
+	// int sidebit;
+
+	if (anode.contents != -1) {
+		return;
+	}
+	let node = anode as mnode_t
+
+	let splitplane = node.plane;
+	let dist = SHARED.DotProduct(light.origin, splitplane.normal) - splitplane.dist;
+
+	if (dist > light.intensity - DLIGHT_CUTOFF) {
+		WebGL_MarkLights(light, bit, node.children[0]);
+		return;
+	}
+
+	if (dist < -light.intensity + DLIGHT_CUTOFF) {
+		WebGL_MarkLights(light, bit, node.children[1]);
+		return;
+	}
+
+	/* mark the polygons */
+	for (let i = 0; i < node.numsurfaces; i++)
+	{
+		let surf = gl3_worldmodel.surfaces[node.firstsurface + i];
+		if (surf.dlightframe != r_dlightframecount) {
+			surf.dlightbits = 0;
+			surf.dlightframe = r_dlightframecount;
+		}
+
+		let dist = SHARED.DotProduct(light.origin, surf.plane.normal) - surf.plane.dist;
+		let sidebit = 0
+		if (dist >= 0) {
+			sidebit = 0;
+		} else {
+			sidebit = SURF_PLANEBACK;
+		}
+
+		if ((surf.flags & SURF_PLANEBACK) != sidebit) {
+			continue;
+		}
+
+		surf.dlightbits |= bit;
+	}
+
+	WebGL_MarkLights(light, bit, node.children[0]);
+	WebGL_MarkLights(light, bit, node.children[1]);
+}
 
 
 export function WebGL_PushDlights(gl: WebGL2RenderingContext)
@@ -41,23 +99,20 @@ export function WebGL_PushDlights(gl: WebGL2RenderingContext)
 	// dlight_t *l;
 
 	/* because the count hasn't advanced yet for this frame */
-	// r_dlightframecount = gl3_framecount + 1;
+	r_dlightframecount = gl3_framecount + 1;
 
-	// l = gl3_newrefdef.dlights;
-
-    gl3state.uniLightsData.numDynLights = 0
-	// gl3state.uniLightsData.numDynLights = gl3_newrefdef.num_dlights;
+    gl3state.uniLightsData.numDynLights = gl3_newrefdef.dlights.length;
 
     let i = 0
-	// for (i = 0; i < gl3_newrefdef.num_dlights; i++, l++)
-	// {
-	// 	gl3UniDynLight* udl = &gl3state.uniLightsData.dynLights[i];
-	// 	GL3_MarkLights(l, 1 << i, gl3_worldmodel->nodes);
+	for (i = 0; i < gl3_newrefdef.dlights.length; i++) {
+		let l = gl3_newrefdef.dlights[i];
+		let dl = gl3state.uniLightsData.dynLight(i);
+		WebGL_MarkLights(l, 1 << i, gl3_worldmodel.nodes[0]);
 
-	// 	VectorCopy(l->origin, udl->origin);
-	// 	VectorCopy(l->color, udl->color);
-	// 	udl->intensity = l->intensity;
-	// }
+		dl.origin = l.origin;
+		dl.color = l.color;
+		dl.intensity = l.intensity;
+	}
 
 	// assert(MAX_DLIGHTS == 32 && "If MAX_DLIGHTS changes, remember to adjust the uniform buffer definition in the shader!");
 
@@ -80,7 +135,7 @@ export function WebGL_PushDlights(gl: WebGL2RenderingContext)
 export function WebGL_BuildLightMap(gl: WebGL2RenderingContext, surf: msurface_t, offsetInLMbuf: number, stride: number) {
 
 	if (surf.texinfo.flags & (SURF_SKY | SURF_TRANS33 | SURF_TRANS66 | SURF_WARP)) {
-		Com_Error(ERR_DROP, "GL3_BuildLightMap called for non-lit surface");
+		Com_Error(SHARED.ERR_DROP, "GL3_BuildLightMap called for non-lit surface");
 	}
 
 	let smax = (surf.extents[0] >> 4) + 1;
@@ -90,14 +145,14 @@ export function WebGL_BuildLightMap(gl: WebGL2RenderingContext, surf: msurface_t
 	stride -= (smax << 2);
 
 	if (size > 34*34*3) {
-		Com_Error(ERR_DROP, "Bad s_blocklights size");
+		Com_Error(SHARED.ERR_DROP, "Bad s_blocklights size");
 	}
 
 	// count number of lightmaps surf actually has
     let numMaps = 0
 	for (numMaps = 0; numMaps < MAX_LIGHTMAPS_PER_SURFACE && surf.styles[numMaps] != 255; ++numMaps) {}
 
-	// if (surf.samples == null)
+	if (surf.samples == null)
 	{
 		// no lightmap samples? set at least one lightmap to fullbright, rest to 0 as normal
 
@@ -134,58 +189,58 @@ export function WebGL_BuildLightMap(gl: WebGL2RenderingContext, surf: msurface_t
 	// without converting to float first etc
 
 	// lightmap = surf->samples;
-    // let lightmap_i = 0
+    let lightmap_i = 0
 
-    // let map = 0
-	// for(map=0; map<numMaps; ++map)
-	// {
-    //     let dest_i = offsetInLMbuf
-	// 	let idxInLightmap = 0;
-	// 	for (let i = 0; i < tmax; i++, dest_i += stride)
-	// 	{
-	// 		for (let j = 0; j < smax; j++)
-	// 		{
-    //             const r = surf.samples[lightmap_i + idxInLightmap * 3 + 0]
-    //             const g = surf.samples[lightmap_i + idxInLightmap * 3 + 1]
-    //             const b = surf.samples[lightmap_i + idxInLightmap * 3 + 2]
+    let map = 0
+	for(map=0; map<numMaps; ++map)
+	{
+        let dest_i = offsetInLMbuf
+		let idxInLightmap = 0;
+		for (let i = 0; i < tmax; i++, dest_i += stride)
+		{
+			for (let j = 0; j < smax; j++)
+			{
+                const r = surf.samples[lightmap_i + idxInLightmap * 3 + 0]
+                const g = surf.samples[lightmap_i + idxInLightmap * 3 + 1]
+                const b = surf.samples[lightmap_i + idxInLightmap * 3 + 2]
 
-	// 			/* determine the brightest of the three color components */
-    //             let max = 0
-	// 			if (r > g)  max = r;
-	// 			else  max = g;
+				/* determine the brightest of the three color components */
+                let max = 0
+				if (r > g)  max = r;
+				else  max = g;
 
-	// 			if (b > max)  max = b;
+				if (b > max)  max = b;
 
-	// 			/* alpha is ONLY used for the mono lightmap case. For this
-	// 			   reason we set it to the brightest of the color components
-	// 			   so that things don't get too dim. */
-	// 			const a = max;
+				/* alpha is ONLY used for the mono lightmap case. For this
+				   reason we set it to the brightest of the color components
+				   so that things don't get too dim. */
+				const a = max;
 
-	// 			gl3_lms.lightmap_buffers[map][dest_i + 0] = r;
-	// 			gl3_lms.lightmap_buffers[map][dest_i + 1] = g;
-	// 			gl3_lms.lightmap_buffers[map][dest_i + 2] = b;
-	// 			gl3_lms.lightmap_buffers[map][dest_i + 3] = a;
+				gl3_lms.lightmap_buffers[map][dest_i + 0] = r;
+				gl3_lms.lightmap_buffers[map][dest_i + 1] = g;
+				gl3_lms.lightmap_buffers[map][dest_i + 2] = b;
+				gl3_lms.lightmap_buffers[map][dest_i + 3] = a;
 
-	// 			dest_i += 4;
-	// 			++idxInLightmap;
-	// 		}
-	// 	}
+				dest_i += 4;
+				++idxInLightmap;
+			}
+		}
 
-	// 	lightmap_i += size * 3; /* skip to next lightmap */
-	// }
+		lightmap_i += size * 3; /* skip to next lightmap */
+	}
 
-	// for ( ; map < MAX_LIGHTMAPS_PER_SURFACE; ++map)
-	// {
-	// 	// like above, fill up remaining lightmaps with 0
+	for ( ; map < MAX_LIGHTMAPS_PER_SURFACE; ++map)
+	{
+		// like above, fill up remaining lightmaps with 0
 
-    //     let dest_i = offsetInLMbuf
+        let dest_i = offsetInLMbuf
 
-	// 	for (let i = 0; i < tmax; i++, dest_i += stride) {
-    //         for (let j = 0; j < 4*smax; j++) {
-    //             gl3_lms.lightmap_buffers[map][dest_i + j] = 0
-    //         }
-	// 		dest_i += 4*smax;
-	// 	}
-	// }
+		for (let i = 0; i < tmax; i++, dest_i += stride) {
+            for (let j = 0; j < 4*smax; j++) {
+                gl3_lms.lightmap_buffers[map][dest_i + j] = 0
+            }
+			dest_i += 4*smax;
+		}
+	}
 }
 

@@ -33,6 +33,7 @@ import { VID_StartRendering } from "../client/vid"
 import { Key_Init } from "../client/cl_keyboard"
 import { Network_Connect } from "./network"
 import {Netchan_Init } from "./netchan"
+import { COLL_Init } from "./collision"
 
 let developer: SHARED.cvar_t
 let modder: SHARED.cvar_t
@@ -70,6 +71,7 @@ async function  Qcommon_ExecConfigs(gameStartUp: boolean) {
 
 export async function Qcommon_Init() {
     Sys_Milliseconds();
+	COLL_Init()
 	// Jump point used in emergency situations.
 // 	if (setjmp(abortframe))
 // 	{

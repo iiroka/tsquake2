@@ -26,8 +26,9 @@
  */
 import * as SHARED from "../common/shared"
 import { Pmove, SetAirAccelerate } from "../common/pmove"
-import { CMD_BACKUP, connstate_t } from "./client";
-import { cl, cls, cl_paused, cl_predict } from "./cl_main";
+import { CMD_BACKUP, connstate_t, MAX_PARSE_ENTITIES } from "./client";
+import { cl, cls, cl_parse_entities, cl_paused, cl_predict } from "./cl_main";
+import { CM_BoxTrace, CM_PointContents, CM_TransformedPointContents } from "../common/collision";
 
 
 export function CL_CheckPredictionError() {
@@ -68,6 +69,134 @@ export function CL_CheckPredictionError() {
 	}
 }
 
+function CL_ClipMoveToEntities(start: number[], mins: number[], maxs: number[],
+		end: number[], tr: SHARED.trace_t)
+{
+	// int i, x, zd, zu;
+	// trace_t trace;
+	// int headnode;
+	// float *angles;
+	// entity_state_t *ent;
+	// int num;
+	// cmodel_t *cmodel;
+	// vec3_t bmins, bmaxs;
+
+	// for (i = 0; i < cl.frame.num_entities; i++)
+	// {
+	// 	num = (cl.frame.parse_entities + i) & (MAX_PARSE_ENTITIES - 1);
+	// 	ent = &cl_parse_entities[num];
+
+	// 	if (!ent->solid)
+	// 	{
+	// 		continue;
+	// 	}
+
+	// 	if (ent->number == cl.playernum + 1)
+	// 	{
+	// 		continue;
+	// 	}
+
+	// 	if (ent->solid == 31)
+	// 	{
+	// 		/* special value for bmodel */
+	// 		cmodel = cl.model_clip[ent->modelindex];
+
+	// 		if (!cmodel)
+	// 		{
+	// 			continue;
+	// 		}
+
+	// 		headnode = cmodel->headnode;
+	// 		angles = ent->angles;
+	// 	}
+	// 	else
+	// 	{
+	// 		/* encoded bbox */
+	// 		x = 8 * (ent->solid & 31);
+	// 		zd = 8 * ((ent->solid >> 5) & 31);
+	// 		zu = 8 * ((ent->solid >> 10) & 63) - 32;
+
+	// 		bmins[0] = bmins[1] = -(float)x;
+	// 		bmaxs[0] = bmaxs[1] = (float)x;
+	// 		bmins[2] = -(float)zd;
+	// 		bmaxs[2] = (float)zu;
+
+	// 		headnode = CM_HeadnodeForBox(bmins, bmaxs);
+	// 		angles = vec3_origin; /* boxes don't rotate */
+	// 	}
+
+	// 	if (tr->allsolid)
+	// 	{
+	// 		return;
+	// 	}
+
+	// 	trace = CM_TransformedBoxTrace(start, end,
+	// 			mins, maxs, headnode, MASK_PLAYERSOLID,
+	// 			ent->origin, angles);
+
+	// 	if (trace.allsolid || trace.startsolid ||
+	// 		(trace.fraction < tr->fraction))
+	// 	{
+	// 		trace.ent = (struct edict_s *)ent;
+
+	// 		if (tr->startsolid)
+	// 		{
+	// 			*tr = trace;
+	// 			tr->startsolid = true;
+	// 		}
+	// 		else
+	// 		{
+	// 			*tr = trace;
+	// 		}
+	// 	}
+	// }
+}
+
+
+function CL_PMTrace(start: number[], mins: number[], maxs: number[], end: number[]): SHARED.trace_t
+{
+
+	/* check against world */
+	let t = CM_BoxTrace(start, end, mins, maxs, 0, SHARED.MASK_PLAYERSOLID);
+
+	if (t.fraction < 1.0) {
+		t.ent = Object(1);
+	}
+
+	/* check all other solid models */
+	CL_ClipMoveToEntities(start, mins, maxs, end, t);
+
+	return t;
+}
+
+function CL_PMpointcontents(point: number[]): number
+{
+
+	let contents = CM_PointContents(point, 0);
+
+	for (let i = 0; i < cl.frame.num_entities; i++)
+	{
+		let num = (cl.frame.parse_entities + i) & (MAX_PARSE_ENTITIES - 1);
+		let ent = cl_parse_entities[num];
+
+		if (ent.solid != 31) /* special value for bmodel */
+		{
+			continue;
+		}
+
+		let cmodel = cl.model_clip[ent.modelindex];
+
+		if (!cmodel) {
+			continue;
+		}
+
+		contents |= CM_TransformedPointContents(point, cmodel.headnode, ent.origin, ent.angles);
+	}
+
+	return contents;
+}
+
+
 /*
  * Sets cl.predicted_origin and cl.predicted_angles
  */
@@ -107,8 +236,8 @@ export function CL_PredictMovement() {
 
 	/* copy current state to pmove */
     let pm  = new SHARED.pmove_t()
-	// pm.trace = CL_PMTrace;
-	// pm.pointcontents = CL_PMpointcontents;
+	pm.trace = CL_PMTrace;
+	pm.pointcontents = CL_PMpointcontents;
 	SetAirAccelerate(parseFloat(cl.configstrings[SHARED.CS_AIRACCEL]))
 	pm.s = cl.frame.playerstate.pmove;
 

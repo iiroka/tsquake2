@@ -34,13 +34,15 @@ import { WebGL_InitParticleTexture, WebGL_SetDefaultState } from "./webgl_misc"
 import { imagetype_t, webglimage_t, WebGL_FindImage, WebGL_ImageInit, WebGL_TextureMode } from "./webgl_image"
 import { WebGL_InitShaders, WebGL_UpdateUBOCommon, WebGL_UpdateUBO2D, WebGL_UpdateUBO3D } from "./webgl_shaders"
 import { WebGL_Draw_GetPalette, WebGL_Draw_InitLocal, WebGL_Draw_StretchPic, WebGL_Draw_CharScaled,
-    WebGL_Draw_PicScaled, WebGL_Draw_GetPicSize, WebGL_Draw_FindPic } from "./webgl_draw"
+    WebGL_Draw_PicScaled, WebGL_Draw_GetPicSize, WebGL_Draw_FindPic, d_8to24table, WebGL_Draw_Fill } from "./webgl_draw"
 import { Qcommon_Frame } from "../../common/frame";
 import { WebGL_Mod_Init, WebGL_Mod_BeginRegistration, webglmodel_t, WebGL_Mod_RegisterModel, webglbrushmodel_t, modtype_t, WebGL_Mod_PointInLeaf } from "./webgl_model"
 import { MAX_LIGHTMAPS, MAX_LIGHTMAPS_PER_SURFACE } from "./webgl_lightmap";
-import { WebGL_DrawWorld, WebGL_MarkLeaves, WebGL_SurfInit } from "./webgl_surf"
+import { WebGL_DrawAlphaSurfaces, WebGL_DrawBrushModel, WebGL_DrawWorld, WebGL_MarkLeaves, WebGL_SurfInit } from "./webgl_surf"
 import { CONTENTS_SOLID, PLANE_ANYZ } from "../../common/filesystem";
 import { WebGL_PushDlights } from "./webgl_light";
+import { WebGL_DrawAliasModel } from "./webgl_mesh"
+import { WebGL_SetSky } from "./webgl_warp";
 
 // attribute locations for vertex shaders
 export const GL3_ATTRIB_POSITION   = 0
@@ -100,15 +102,36 @@ class gl3Uni3D_t {
         	this.data[i] = v[i]
 		}
     }
+    get transProjMat4(): Float32Array {
+		let res = new Float32Array(16)
+		for (let i = 0; i < 16; i++) {
+        	res[i] = this.data[i]
+		}
+		return res
+    }
     set transViewMat4(v: Float32Array) {
 		for (let i = 0; i < 16 && i < v.length; i++) {
         	this.data[1 * 16 + i] = v[i]
 		}
     }
+    get transViewMat4(): Float32Array {
+		let res = new Float32Array(16)
+		for (let i = 0; i < 16; i++) {
+        	res[i] = this.data[1 * 16 + i]
+		}
+		return res
+    }
     set transModelMat4(v: Float32Array) {
 		for (let i = 0; i < 16 && i < v.length; i++) {
         	this.data[2 * 16 + i] = v[i]
 		}
+    }
+    get transModelMat4(): Float32Array {
+		let res = new Float32Array(16)
+		for (let i = 0; i < 16; i++) {
+        	res[i] = this.data[2 * 16 + i]
+		}
+		return res
     }
 
     set scroll(v: number) { // for SURF_FLOWING
@@ -341,8 +364,8 @@ export function SetCurrentEntity(m: entity_t) {
 	currententity = m
 }
 
-let gl3depthmin = 0
-let gl3depthmax = 0
+export let gl3depthmin = 0
+export let gl3depthmax = 0
 
 export let gl3_visframecount = 0; /* bumped when going to a new PVS */
 export function IncrGl3VisFramecount() {
@@ -366,7 +389,7 @@ export let frustum = [
 let vup = [0,0,0]
 let vpn = [0,0,0]
 let vright = [0,0,0]
-let gl3_origin = [0,0,0]
+export let gl3_origin = [0,0,0]
 
 export let gl3_viewcluster = 0
 export let gl3_viewcluster2 = 0
@@ -410,6 +433,48 @@ let gl_zfix: SHARED.cvar_t
 let r_clear: SHARED.cvar_t
 export let gl_cull: SHARED.cvar_t
 export let r_novis: SHARED.cvar_t
+export let r_gunfov: SHARED.cvar_t
+
+// Yaw-Pitch-Roll
+// equivalent to R_z * R_y * R_x where R_x is the trans matrix for rotating around X axis for aroundXdeg
+function rotAroundAxisZYX(aroundZdeg: number, aroundYdeg: number, aroundXdeg: number): Float32Array
+{
+	// Naming of variables is consistent with http://planning.cs.uiuc.edu/node102.html
+	// and https://de.wikipedia.org/wiki/Roll-Nick-Gier-Winkel#.E2.80.9EZY.E2.80.B2X.E2.80.B3-Konvention.E2.80.9C
+	const alpha = HMM.HMM_ToRadians(aroundZdeg);
+	const beta = HMM.HMM_ToRadians(aroundYdeg);
+	const gamma = HMM.HMM_ToRadians(aroundXdeg);
+
+	const sinA = Math.sin(alpha);
+	const cosA = Math.cos(alpha);
+	// TODO: or sincosf(alpha, &sinA, &cosA); ?? (not a standard function)
+	const sinB = Math.sin(beta);
+	const cosB = Math.cos(beta);
+	const sinG = Math.sin(gamma);
+	const cosG = Math.cos(gamma);
+
+	return new Float32Array([
+		cosA*cosB,                  sinA*cosB,                   -sinB,    0, // first *column*
+		cosA*sinB*sinG - sinA*cosG, sinA*sinB*sinG + cosA*cosG, cosB*sinG, 0,
+		cosA*sinB*cosG + sinA*sinG, sinA*sinB*cosG - cosA*sinG, cosB*cosG, 0,
+		 0,                          0,                          0,        1
+	]);
+
+}
+
+export function WebGL_RotateForEntity(gl: WebGL2RenderingContext, e: entity_t) {
+	// angles: pitch (around y), yaw (around z), roll (around x)
+	// rot matrices to be multiplied in order Z, Y, X (yaw, pitch, roll)
+	let transMat = rotAroundAxisZYX(e.angles[1], -e.angles[0], -e.angles[2]);
+
+	for(let i=0; i<3; ++i) {
+		transMat[3*4+i] = e.origin[i]; // set translation
+	}
+
+	gl3state.uni3DData.transModelMat4 = HMM.HMM_MultiplyMat4(gl3state.uni3DData.transModelMat4, transMat);
+
+	WebGL_UpdateUBO3D(gl);
+}
 
 
 function WebGL_Strings(gl: WebGL2RenderingContext) {
@@ -432,7 +497,7 @@ function WebGL_Strings(gl: WebGL2RenderingContext) {
 
 function WebGL_Register() {
 	// gl_lefthand = ri.Cvar_Get("hand", "0", CVAR_USERINFO | CVAR_ARCHIVE);
-	// r_gunfov = ri.Cvar_Get("r_gunfov", "80", CVAR_ARCHIVE);
+	r_gunfov = Cvar_Get("r_gunfov", "80", SHARED.CVAR_ARCHIVE);
 	r_farsee = Cvar_Get("r_farsee", "0", SHARED.CVAR_LATCH | SHARED.CVAR_ARCHIVE);
 
 	gl_drawbuffer = Cvar_Get("gl_drawbuffer", "GL_BACK", 0);
@@ -671,8 +736,6 @@ async function WebGL_Init(): Promise<boolean>
 
 
 	// generate texture handles for all possible lightmaps
-	// gl.createTexture
-	// GLuint lightmap_textureIDs[MAX_LIGHTMAPS][MAX_LIGHTMAPS_PER_SURFACE]; // instead of lightmap_textures+i use lightmap_textureIDs[i]
 	gl3state.lightmap_textureIDs = new Array<WebGLTexture[]>(MAX_LIGHTMAPS);
 	for (let i = 0; i < MAX_LIGHTMAPS; i++) {
 		gl3state.lightmap_textureIDs[i] = new Array<WebGLTexture>(MAX_LIGHTMAPS_PER_SURFACE);
@@ -680,7 +743,6 @@ async function WebGL_Init(): Promise<boolean>
 			gl3state.lightmap_textureIDs[i][j] = gl.createTexture()
 		}
 	}
-// 	glGenTextures(MAX_LIGHTMAPS*MAX_LIGHTMAPS_PER_SURFACE, gl3state.lightmap_textureIDs[0]);
 
 	WebGL_SetDefaultState(gl);
 
@@ -701,6 +763,70 @@ async function WebGL_Init(): Promise<boolean>
 
     Com_Printf( "\n");
 	return true;
+}
+
+function WebGL_DrawParticles(gl: WebGL2RenderingContext) {
+	// TODO: stereo
+	//qboolean stereo_split_tb = ((gl_state.stereo_mode == STEREO_SPLIT_VERTICAL) && gl_state.camera_separation);
+	//qboolean stereo_split_lr = ((gl_state.stereo_mode == STEREO_SPLIT_HORIZONTAL) && gl_state.camera_separation);
+
+	//if (!(stereo_split_tb || stereo_split_lr))
+	{
+		// assume the size looks good with window height 480px and scale according to real resolution
+		let pointSize = gl3_particle_size.float * gl3_newrefdef.height/480.0;
+
+		// typedef struct part_vtx {
+		// 	GLfloat pos[3];
+		// 	GLfloat size;
+		// 	GLfloat dist;
+		// 	GLfloat color[4];
+		// } part_vtx;
+		// assert(sizeof(part_vtx)==9*sizeof(float)); // remember to update GL3_SurfInit() if this changes!
+
+		// part_vtx buf[numParticles];
+		let buf = new Float32Array(9 * gl3_newrefdef.particles.length)
+
+		// TODO: viewOrg could be in UBO
+		let viewOrg = [0,0,0]
+		SHARED.VectorCopy(gl3_newrefdef.vieworg, viewOrg);
+
+		gl.depthMask(false);
+		gl.enable(gl.BLEND);
+		// gl.enable(gl.PROGRAM_POINT_SIZE);
+
+		gl3state.UseProgram(gl, gl3state.siParticle.shaderProgram);
+
+		for ( let i  = 0;i < gl3_newrefdef.particles.length; i++ ) {
+			// part_vtx* cur = &buf[i];
+			let p = gl3_newrefdef.particles[i]
+			let color = d_8to24table [ p.color & 0xFF ];
+			const idx = 9 * i
+			let offset = [0,0,0]; // between viewOrg and particle position
+			SHARED.VectorSubtract(viewOrg, p.origin, offset);
+
+			// Pos
+			buf[idx + 0] = p.origin[0]
+			buf[idx + 1] = p.origin[1]
+			buf[idx + 2] = p.origin[2]
+			buf[idx + 3] = pointSize // Size
+			buf[idx + 4] = SHARED.VectorLength(offset); // Dist
+			// Color
+			buf[idx + 5] = (color & 0xFF)/255.0
+			buf[idx + 6] = ((color >> 8) & 0xFF)/255.0
+			buf[idx + 7] = ((color >> 16) & 0xFF)/255.0
+			buf[idx + 8] = p.alpha;
+		}
+
+		gl3state.BindVAO(gl, gl3state.vaoParticle);
+		gl3state.BindVBO(gl, gl3state.vboParticle);
+		gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STREAM_DRAW);
+		gl.drawArrays(gl.POINTS, 0, gl3_newrefdef.particles.length);
+
+
+		gl.disable(gl.BLEND);
+		gl.depthMask(true);
+		// gl.disable(gl.PROGRAM_POINT_SIZE);
+	}
 }
 
 function WebGL_DrawEntitiesOnList(gl: WebGL2RenderingContext) {
@@ -737,10 +863,10 @@ function WebGL_DrawEntitiesOnList(gl: WebGL2RenderingContext) {
 			currentmodel = currententity.model as webglmodel_t;
 			switch (currentmodel.type) {
 				case modtype_t.mod_alias:
-	// 				GL3_DrawAliasModel(currententity);
+					WebGL_DrawAliasModel(gl, currententity);
 					break;
 				case modtype_t.mod_brush:
-	// 				GL3_DrawBrushModel(currententity);
+					WebGL_DrawBrushModel(gl, currententity);
 					break;
 	// 			case mod_sprite:
 	// 				GL3_DrawSpriteModel(currententity);
@@ -781,10 +907,10 @@ function WebGL_DrawEntitiesOnList(gl: WebGL2RenderingContext) {
 			currentmodel = currententity.model as webglmodel_t;
 			switch (currentmodel.type) {
 				case modtype_t.mod_alias:
-	// 				GL3_DrawAliasModel(currententity);
+					WebGL_DrawAliasModel(gl, currententity);
 					break;
 				case modtype_t.mod_brush:
-	// 				GL3_DrawBrushModel(currententity);
+					WebGL_DrawBrushModel(gl, currententity);
 					break;
 	// 			case mod_sprite:
 	// 				GL3_DrawSpriteModel(currententity);
@@ -1063,7 +1189,7 @@ function rotAroundAxisXYZ(aroundXdeg: number, aroundYdeg: number, aroundZdeg: nu
 
 
 // equivalent to R_MYgluPerspective() but returning a matrix instead of setting internal OpenGL state
-export function GL3_MYgluPerspective(fovy: number, aspect: number, zNear: number, zFar: number): Float32Array {
+export function WebGL_MYgluPerspective(fovy: number, aspect: number, zNear: number, zFar: number): Float32Array {
 	// calculation of left, right, bottom, top is from R_MYgluPerspective() of old gl backend
 	// which seems to be slightly different from the real gluPerspective()
 	// and thus also from HMM_Perspective()
@@ -1112,7 +1238,7 @@ function SetupGL(gl: WebGL2RenderingContext) {
 	{
 		let screenaspect = gl3_newrefdef.width / gl3_newrefdef.height;
 		let dist = (r_farsee.bool) ? 8192.0 : 4096.0
-		gl3state.uni3DData.transProjMat4 = GL3_MYgluPerspective(gl3_newrefdef.fov_y, screenaspect, 4, dist);
+		gl3state.uni3DData.transProjMat4 = WebGL_MYgluPerspective(gl3_newrefdef.fov_y, screenaspect, 4, dist);
 	}
 
 	gl.cullFace(gl.FRONT);
@@ -1194,12 +1320,12 @@ function WebGL_RenderView(gl: WebGL2RenderingContext, fd: refdef_t) {
 
 	WebGL_DrawEntitiesOnList(gl);
 
-	// // kick the silly gl1_flashblend poly lights
-	// // GL3_RenderDlights();
+	// kick the silly gl1_flashblend poly lights
+	// GL3_RenderDlights();
 
-	// GL3_DrawParticles();
+	WebGL_DrawParticles(gl);
 
-	// GL3_DrawAlphaSurfaces();
+	WebGL_DrawAlphaSurfaces(gl);
 
 	// Note: R_Flash() is now GL3_Draw_Flash() and called from GL3_RenderFrame()
 
@@ -1263,15 +1389,18 @@ class WebGl_Ref implements refexport_t {
     public async DrawGetPicSize(name: string): Promise<number[]> {
         return WebGL_Draw_GetPicSize(webgl_gl, name)
     }
-    public async DrawStretchPic (x: number, y: number, w: number, h: number, name: string): Promise<any> {
+    public async DrawStretchPic (x: number, y: number, w: number, h: number, name: string): Promise<void> {
         await WebGL_Draw_StretchPic(webgl_gl, ~~x, ~~y, ~~w, ~~h, name)
     }
-    public async DrawPicScaled(x: number, y: number, pic: string, factor: number): Promise<any> {
+    public async DrawPicScaled(x: number, y: number, pic: string, factor: number): Promise<void> {
         await WebGL_Draw_PicScaled(webgl_gl, ~~x, ~~y, pic, factor)
     }
     public DrawCharScaled(x: number, y: number, num: number, scale: number) {
         WebGL_Draw_CharScaled(webgl_gl, ~~x, ~~y, ~~num, scale)
     }
+	public DrawFill(x: number, y: number, w: number, h: number, c: number) {
+		WebGL_Draw_Fill(webgl_gl, x, y, w, h, c)
+	}
     public Start(): any {
         is_running = true
         last_frame = Date.now();
@@ -1296,6 +1425,9 @@ class WebGl_Ref implements refexport_t {
 	}
 	public async RenderFrame(fd: refdef_t): Promise<any> {
 		await WebGL_RenderFrame(webgl_gl, fd)
+	}
+	public async SetSky(name: string, rotate: number, axis: number[]): Promise<any> {
+		await WebGL_SetSky(webgl_gl, name, rotate, axis)
 	}
 }
 

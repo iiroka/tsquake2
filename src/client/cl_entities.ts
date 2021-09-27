@@ -26,10 +26,11 @@
 import * as SHARED from "../common/shared"
 import { UPDATE_MASK } from "../common/common";
 import { connstate_t, frame_t, MAX_CLIENTWEAPONMODELS, MAX_PARSE_ENTITIES } from "./client";
-import { cl, cls, cl_entities, cl_kickangles, cl_parse_entities, cl_paused, cl_predict, cl_vwep } from "./cl_main";
+import { cl, cls, cl_entities, cl_kickangles, cl_parse_entities, cl_paused, cl_predict, cl_showclamp, cl_vwep, horplus } from "./cl_main";
 import { entity_t } from "./ref";
-import { V_AddEntity } from "./cl_view";
-import { CL_AddLightStyles } from "./cl_light";
+import { gun_frame, gun_model, V_AddEntity } from "./cl_view";
+import { CL_AddDLights, CL_AddLightStyles } from "./cl_light";
+import { Com_Printf } from "../common/clientserver";
 
 function CL_AddPacketEntities(frame: frame_t) {
 	// entity_t ent = {0};
@@ -88,53 +89,53 @@ function CL_AddPacketEntities(frame: frame_t) {
 		}
 
 		/* quad and pent can do different things on client */
-	// 	if (effects & SHARED.EF_PENT)
-	// 	{
-	// 		effects &= ~EF_PENT;
-	// 		effects |= EF_COLOR_SHELL;
-	// 		renderfx |= RF_SHELL_RED;
-	// 	}
+		if (effects & SHARED.EF_PENT)
+		{
+			effects &= ~SHARED.EF_PENT;
+			effects |= SHARED.EF_COLOR_SHELL;
+			renderfx |= SHARED.RF_SHELL_RED;
+		}
 
-	// 	if (effects & EF_QUAD)
-	// 	{
-	// 		effects &= ~EF_QUAD;
-	// 		effects |= EF_COLOR_SHELL;
-	// 		renderfx |= RF_SHELL_BLUE;
-	// 	}
+		if (effects & SHARED.EF_QUAD)
+		{
+			effects &= ~SHARED.EF_QUAD;
+			effects |= SHARED.EF_COLOR_SHELL;
+			renderfx |= SHARED.RF_SHELL_BLUE;
+		}
 
-	// 	if (effects & EF_DOUBLE)
-	// 	{
-	// 		effects &= ~EF_DOUBLE;
-	// 		effects |= EF_COLOR_SHELL;
-	// 		renderfx |= RF_SHELL_DOUBLE;
-	// 	}
+		if (effects & SHARED.EF_DOUBLE)
+		{
+			effects &= ~SHARED.EF_DOUBLE;
+			effects |= SHARED.EF_COLOR_SHELL;
+			renderfx |= SHARED.RF_SHELL_DOUBLE;
+		}
 
-	// 	if (effects & EF_HALF_DAMAGE)
-	// 	{
-	// 		effects &= ~EF_HALF_DAMAGE;
-	// 		effects |= EF_COLOR_SHELL;
-	// 		renderfx |= RF_SHELL_HALF_DAM;
-	// 	}
+		if (effects & SHARED.EF_HALF_DAMAGE)
+		{
+			effects &= ~SHARED.EF_HALF_DAMAGE;
+			effects |= SHARED.EF_COLOR_SHELL;
+			renderfx |= SHARED.RF_SHELL_HALF_DAM;
+		}
 
 		ent.oldframe = cent.prev.frame;
 		ent.backlerp = 1.0 - cl.lerpfrac;
 
-	// 	if (renderfx & (RF_FRAMELERP | RF_BEAM))
-	// 	{
-	// 		/* step origin discretely, because the
-	// 		   frames do the animation properly */
-	// 		VectorCopy(cent->current.origin, ent.origin);
-	// 		VectorCopy(cent->current.old_origin, ent.oldorigin);
-	// 	}
-	// 	else
-	// 	{
+		if (renderfx & (SHARED.RF_FRAMELERP | SHARED.RF_BEAM))
+		{
+			/* step origin discretely, because the
+			   frames do the animation properly */
+            SHARED.VectorCopy(cent.current.origin, ent.origin);
+            SHARED.VectorCopy(cent.current.old_origin, ent.oldorigin);
+		}
+		else
+		{
 			/* interpolate origin */
 			for (let i = 0; i < 3; i++)
 			{
 				ent.origin[i] = ent.oldorigin[i] = cent.prev.origin[i] + cl.lerpfrac *
 				   	(cent.current.origin[i] - cent.prev.origin[i]);
 			}
-	// 	}
+		}
 
 		/* tweak the color of beams */
 		if (renderfx & SHARED.RF_BEAM)
@@ -190,31 +191,31 @@ function CL_AddPacketEntities(frame: frame_t) {
 			}
 		}
 
-	// 	/* only used for black hole model right now */
-	// 	if (renderfx & RF_TRANSLUCENT && !(renderfx & RF_BEAM))
-	// 	{
-	// 		ent.alpha = 0.70f;
-	// 	}
+		/* only used for black hole model right now */
+		if (renderfx & SHARED.RF_TRANSLUCENT && !(renderfx & SHARED.RF_BEAM))
+		{
+			ent.alpha = 0.70;
+		}
 
-	// 	/* render effects (fullbright, translucent, etc) */
-	// 	if ((effects & EF_COLOR_SHELL))
-	// 	{
-	// 		ent.flags = 0; /* renderfx go on color shell entity */
-	// 	}
-	// 	else
-	// 	{
+		/* render effects (fullbright, translucent, etc) */
+		if ((effects & SHARED.EF_COLOR_SHELL))
+		{
+			ent.flags = 0; /* renderfx go on color shell entity */
+		}
+		else
+		{
 			ent.flags = renderfx;
-	// 	}
+		}
 
 		/* calculate angles */
-	// 	if (effects & EF_ROTATE)
+	// 	if (effects & SHARED.EF_ROTATE)
 	// 	{
 	// 		/* some bonus items auto-rotate */
 	// 		ent.angles[0] = 0;
 	// 		ent.angles[1] = autorotate;
 	// 		ent.angles[2] = 0;
 	// 	}
-	// 	else if (effects & EF_SPINNINGLIGHTS)
+	// 	else if (effects & SHARED.EF_SPINNINGLIGHTS)
 	// 	{
 	// 		ent.angles[0] = 0;
 	// 		ent.angles[1] = anglemod(cl.time / 2) + s1->angles[1];
@@ -243,22 +244,22 @@ function CL_AddPacketEntities(frame: frame_t) {
 		{
 			ent.flags |= SHARED.RF_VIEWERMODEL;
 
-	// 		if (effects & EF_FLAG1)
+	// 		if (effects & SHARED.EF_FLAG1)
 	// 		{
 	// 			V_AddLight(ent.origin, 225, 1.0f, 0.1f, 0.1f);
 	// 		}
 
-	// 		else if (effects & EF_FLAG2)
+	// 		else if (effects & SHARED.EF_FLAG2)
 	// 		{
 	// 			V_AddLight(ent.origin, 225, 0.1f, 0.1f, 1.0f);
 	// 		}
 
-	// 		else if (effects & EF_TAGTRAIL)
+	// 		else if (effects & SHARED.EF_TAGTRAIL)
 	// 		{
 	// 			V_AddLight(ent.origin, 225, 1.0f, 1.0f, 0.0f);
 	// 		}
 
-	// 		else if (effects & EF_TRACKERTRAIL)
+	// 		else if (effects & SHARED.EF_TRACKERTRAIL)
 	// 		{
 	// 			V_AddLight(ent.origin, 225, -1.0f, -1.0f, -1.0f);
 	// 		}
@@ -272,19 +273,19 @@ function CL_AddPacketEntities(frame: frame_t) {
 			continue;
 		}
 
-	// 	if (effects & EF_BFG)
+	// 	if (effects & SHARED.EF_BFG)
 	// 	{
 	// 		ent.flags |= RF_TRANSLUCENT;
 	// 		ent.alpha = 0.30f;
 	// 	}
 
-	// 	if (effects & EF_PLASMA)
+	// 	if (effects & SHARED.EF_PLASMA)
 	// 	{
 	// 		ent.flags |= RF_TRANSLUCENT;
 	// 		ent.alpha = 0.6f;
 	// 	}
 
-	// 	if (effects & EF_SPHERETRANS)
+	// 	if (effects & SHARED.EF_SPHERETRANS)
 	// 	{
 	// 		ent.flags |= RF_TRANSLUCENT;
 
@@ -566,6 +567,68 @@ function CL_AddPacketEntities(frame: frame_t) {
 	}
 }
 
+function CL_AddViewWeapon(ps: SHARED.player_state_t, ops: SHARED.player_state_t)
+{
+    let gun = new entity_t()    /* view model */
+
+	/* allow the gun to be completely removed */
+	// if (!cl_gun->value)
+	// {
+	// 	return;
+	// }
+
+	/* don't draw gun if in wide angle view and drawing not forced */
+	if (ps.fov > 90) {
+	// 	if (cl_gun->value < 2)
+	// 	{
+	// 		return;
+	// 	}
+	}
+
+	if (gun_model) {
+		gun.model = gun_model;
+	}  else {
+		gun.model = cl.model_draw[ps.gunindex];
+	}
+
+	if (!gun.model) {
+		return;
+	}
+
+	/* set up gun position */
+	for (let i = 0; i < 3; i++)
+	{
+		gun.origin[i] = cl.refdef.vieworg[i] + ops.gunoffset[i]
+			+ cl.lerpfrac * (ps.gunoffset[i] - ops.gunoffset[i]);
+		gun.angles[i] = cl.refdef.viewangles[i] + SHARED.LerpAngle(ops.gunangles[i],
+			ps.gunangles[i], cl.lerpfrac);
+	}
+
+	if (gun_frame)
+	{
+		gun.frame = gun_frame;
+		gun.oldframe = gun_frame;
+	}
+	else
+	{
+		gun.frame = ps.gunframe;
+
+		if (gun.frame == 0)
+		{
+			gun.oldframe = 0; /* just changed weapons, don't lerp from old */
+		}
+		else
+		{
+			gun.oldframe = ops.gunframe;
+		}
+	}
+
+	gun.flags = SHARED.RF_MINLIGHT | SHARED.RF_DEPTHHACK | SHARED.RF_WEAPONMODEL;
+	gun.backlerp = 1.0 - cl.lerpfrac;
+	SHARED.VectorCopy(gun.origin, gun.oldorigin); /* don't lerp at all */
+	V_AddEntity(gun);
+}
+
 /*
  * Adapts a 4:3 aspect FOV to the current aspect (Hor+)
  */
@@ -589,10 +652,6 @@ function AdaptFov(fov: number, w: number, h: number): number {
  * Sets cl.refdef view values
  */
 export function CL_CalcViewValues() {
-// 	int i;
-// 	float lerp, backlerp, ifov;
-// 	frame_t *oldframe;
-// 	player_state_t *ps, *ops;
 
 	/* find the previous frame to interpolate from */
 	let ps = cl.frame.playerstate;
@@ -674,23 +733,19 @@ export function CL_CalcViewValues() {
 
 	/* interpolate field of view */
 	let ifov = ops.fov + lerp * (ps.fov - ops.fov);
-// 	if (horplus->value)
-// 	{
-// 		cl.refdef.fov_x = AdaptFov(ifov, cl.refdef.width, cl.refdef.height);
-// 	}
-// 	else
-// 	{
+	if (horplus.bool) {
+		cl.refdef.fov_x = AdaptFov(ifov, cl.refdef.width, cl.refdef.height);
+	} else {
 		cl.refdef.fov_x = ifov;
-// 	}
+	}
 
-// 	/* don't interpolate blend color */
-// 	for (i = 0; i < 4; i++)
-// 	{
-// 		cl.refdef.blend[i] = ps->blend[i];
-// 	}
+	/* don't interpolate blend color */
+	for (let i = 0; i < 4; i++) {
+		cl.refdef.blend[i] = ps.blend[i];
+	}
 
-// 	/* add the weapon */
-// 	CL_AddViewWeapon(ps, ops);
+	/* add the weapon */
+	CL_AddViewWeapon(ps, ops);
 }
 
 /*
@@ -702,21 +757,20 @@ export function CL_AddEntities() {
 	}
 
 	if (cl.time > cl.frame.servertime) {
-		// if (cl_showclamp.) {
-		// 	Com_Printf("high clamp %i\n", cl.time - cl.frame.servertime);
-		// }
+		if (cl_showclamp.bool) {
+			Com_Printf(`high clamp ${~~(cl.time - cl.frame.servertime)}\n`);
+		}
 
 		cl.time = cl.frame.servertime;
 		cl.lerpfrac = 1.0;
 	}
 	else if (cl.time < cl.frame.servertime - 100)
 	{
-		// if (cl_showclamp->value)
-		// {
-		// 	Com_Printf("low clamp %i\n", cl.frame.servertime - 100 - cl.time);
-		// }
+		if (cl_showclamp.bool) {
+			Com_Printf(`low clamp ${~~(cl.frame.servertime - 100 - cl.time)}\n`);
+		}
 
-		cl.time = cl.frame.servertime - 100;
+		cl.time = ~~(cl.frame.servertime - 100);
 		cl.lerpfrac = 0;
 	}
 	else
@@ -733,6 +787,6 @@ export function CL_AddEntities() {
 	CL_AddPacketEntities(cl.frame);
 	// CL_AddTEnts();
 	// CL_AddParticles();
-	// CL_AddDLights();
+	CL_AddDLights();
 	CL_AddLightStyles();
 }

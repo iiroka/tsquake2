@@ -24,14 +24,17 @@
  *
  * =======================================================================
  */
-import { CONTENTS_SOLID, PLANE_X, PLANE_Y, PLANE_Z, SURF_FLOWING, SURF_SKY, SURF_TRANS33, SURF_TRANS66 } from "../../common/filesystem";
+import { CONTENTS_SOLID, MAX_MAP_LEAFS, PLANE_X, PLANE_Y, PLANE_Z, SURF_FLOWING, SURF_SKY, SURF_TRANS33, SURF_TRANS66 } from "../../common/filesystem";
 import * as SHARED from "../../common/shared"
 import { entity_t } from "../ref";
 import { webglimage_t, WebGL_Bind, WebGL_BindLightmap, webgl_textures } from "./webgl_image";
+import { WebGL_MarkLights } from "./webgl_light";
 import { MAX_LIGHTMAPS_PER_SURFACE } from "./webgl_lightmap";
 import { gl3state, GL3_ATTRIB_POSITION, GL3_ATTRIB_TEXCOORD, GL3_ATTRIB_COLOR, GL3_ATTRIB_LMTEXCOORD,
-    GL3_ATTRIB_NORMAL, GL3_ATTRIB_LIGHTFLAGS, gl3_newrefdef, gl3_worldmodel, gl3_visframecount, gl_cull, gl3_framecount, currententity, SetCurrentEntity, SetCurrentModel, gl3ShaderInfo_t, frustum, gl3_oldviewcluster, gl3_oldviewcluster2, gl3_viewcluster, gl3_viewcluster2, r_novis, IncrGl3VisFramecount, SetOldViewCluster } from "./webgl_main";
-import { gl3_3D_vtx_t, mleaf_or_mode, mleaf_t, mnode_t, msurface_t, mtexinfo_t, SURF_DRAWTURB, SURF_PLANEBACK, webglbrushmodel_t } from "./webgl_model";
+    GL3_ATTRIB_NORMAL, GL3_ATTRIB_LIGHTFLAGS, gl3_newrefdef, gl3_worldmodel, gl3_visframecount, gl_cull, gl3_framecount, currententity, SetCurrentEntity, SetCurrentModel, gl3ShaderInfo_t, frustum, gl3_oldviewcluster, gl3_oldviewcluster2, gl3_viewcluster, gl3_viewcluster2, r_novis, IncrGl3VisFramecount, SetOldViewCluster, gl3_identityMat4, currentmodel, WebGL_RotateForEntity } from "./webgl_main";
+import { gl3_3D_vtx_t, mleaf_or_mode, mleaf_t, mnode_t, msurface_t, mtexinfo_t, SURF_DRAWTURB, SURF_PLANEBACK, webglbrushmodel_t, WebGL_Mod_ClusterPVS } from "./webgl_model";
+import { WebGL_UpdateUBO3D } from "./webgl_shaders";
+import { WebGL_AddSkySurface, WebGL_ClearSkyBox, WebGL_DrawSkyBox, WebGL_EmitWaterPolys } from "./webgl_warp";
 
 export let c_visible_lightmaps = 0
 export let c_visible_textures = 0
@@ -194,7 +197,7 @@ function RenderBrushPoly(gl: WebGL2RenderingContext, fa: msurface_t) {
 	if (fa.flags & SURF_DRAWTURB) {
 		WebGL_Bind(gl, image.tex);
 
-	// 	GL3_EmitWaterPolys(fa);
+		WebGL_EmitWaterPolys(gl, fa);
 
 		return;
 	}
@@ -222,6 +225,7 @@ function RenderBrushPoly(gl: WebGL2RenderingContext, fa: msurface_t) {
 	{
 		gl3state.UseProgram(gl, gl3state.si3DlmFlow.shaderProgram);
 		UpdateLMscales(gl, lmScales, gl3state.si3DlmFlow);
+        console.log("DRAW GLOWING")
 	// 	GL3_DrawGLFlowingPoly(fa);
 	}
 	else
@@ -234,6 +238,63 @@ function RenderBrushPoly(gl: WebGL2RenderingContext, fa: msurface_t) {
 	// Note: lightmap chains are gone, lightmaps are rendered together with normal texture in one pass
 }
 
+/*
+ * Draw water surfaces and windows.
+ * The BSP tree is waled front to back, so unwinding the chain
+ * of alpha_surfaces will draw back to front, giving proper ordering.
+ */
+export function WebGL_DrawAlphaSurfaces(gl: WebGL2RenderingContext) {
+	// msurface_t *s;
+
+	/* go back to the world matrix */
+	gl3state.uni3DData.transModelMat4 = gl3_identityMat4;
+	WebGL_UpdateUBO3D(gl);
+
+	gl.enable(gl.BLEND);
+
+	for (let s = gl3_alpha_surfaces; s != null; s = s.texturechain)
+	{
+		WebGL_Bind(gl, s.texinfo.image.tex);
+		c_brush_polys++;
+		let alpha = 1.0;
+		if (s.texinfo.flags & SURF_TRANS33)
+		{
+			alpha = 0.333;
+		}
+		else if (s.texinfo.flags & SURF_TRANS66)
+		{
+			alpha = 0.666;
+		}
+		if(alpha != gl3state.uni3DData.alpha)
+		{
+			gl3state.uni3DData.alpha = alpha;
+			WebGL_UpdateUBO3D(gl);
+		}
+
+		if (s.flags & SURF_DRAWTURB)
+		{
+            WebGL_EmitWaterPolys(gl, s);
+		}
+		else if (s.texinfo.flags & SURF_FLOWING)
+		{
+            console.log("GL3_DrawGLFlowingPoly")
+			// GL3_UseProgram(gl3state.si3DtransFlow.shaderProgram);
+			// GL3_DrawGLFlowingPoly(s);
+		}
+		else
+		{
+			gl3state.UseProgram(gl, gl3state.si3Dtrans.shaderProgram);
+			WebGL_DrawGLPoly(gl, s);
+		}
+	}
+
+	gl3state.uni3DData.alpha = 1.0;
+	WebGL_UpdateUBO3D(gl);
+
+	gl.disable(gl.BLEND);
+
+	gl3_alpha_surfaces = null;
+}
 
 function DrawTextureChains(gl: WebGL2RenderingContext) {
 
@@ -261,6 +322,144 @@ function DrawTextureChains(gl: WebGL2RenderingContext) {
 	}
 
 	// TODO: maybe one loop for normal faces and one for SURF_DRAWTURB ???
+}
+
+function DrawInlineBModel(gl: WebGL2RenderingContext, model: webglbrushmodel_t) {
+	// int i, k;
+	// cplane_t *pplane;
+	// float dot;
+	// msurface_t *psurf;
+	// dlight_t *lt;
+
+	/* calculate dynamic lighting for bmodel */
+	for (let k = 0; k < gl3_newrefdef.dlights.length; k++) {
+		WebGL_MarkLights(gl3_newrefdef.dlights[k], 1 << k, model.nodes[model.firstnode]);
+	}
+
+
+	if (currententity.flags & SHARED.RF_TRANSLUCENT)
+	{
+		gl.enable(gl.BLEND);
+		/* TODO: should I care about the 0.25 part? we'll just set alpha to 0.33 or 0.66 depending on surface flag..
+		glColor4f(1, 1, 1, 0.25);
+		R_TexEnv(GL_MODULATE);
+		*/
+	}
+
+	/* draw texture */
+	for (let i = 0; i < model.nummodelsurfaces; i++)
+	{
+		let psurf = model.surfaces[model.firstmodelsurface];
+		/* find which side of the node we are on */
+		let pplane = psurf.plane;
+
+		let dot = SHARED.DotProduct(modelorg, pplane.normal) - pplane.dist;
+
+		/* draw the polygon */
+		if (((psurf.flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+			(!(psurf.flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+		{
+			if (psurf.texinfo.flags & (SURF_TRANS33 | SURF_TRANS66))
+			{
+				/* add to the translucent chain */
+				psurf.texturechain = gl3_alpha_surfaces;
+				gl3_alpha_surfaces = psurf;
+			}
+			else if(!(psurf.flags & SURF_DRAWTURB))
+			{
+				// SetAllLightFlags(gl, psurf);
+				// RenderLightmappedPoly(gl, psurf);
+			}
+			else
+			{
+				RenderBrushPoly(gl, psurf);
+			}
+		}
+	}
+
+	if (currententity.flags & SHARED.RF_TRANSLUCENT)
+	{
+		gl.disable(gl.BLEND);
+	}
+}
+
+
+export function WebGL_DrawBrushModel(gl: WebGL2RenderingContext, e: entity_t) {
+	// vec3_t mins, maxs;
+	// int i;
+	// qboolean rotated;
+	let model = currentmodel as webglbrushmodel_t
+
+	if (model.nummodelsurfaces == 0) {
+		return;
+	}
+
+	SetCurrentEntity(e);
+	gl3state.currenttexture = -1;
+
+	let rotated = false
+	let mins = [0,0,0]
+	let maxs = [0,0,0]
+	// if (e->angles[0] || e->angles[1] || e->angles[2])
+	// {
+	// 	rotated = true;
+
+	// 	for (i = 0; i < 3; i++)
+	// 	{
+	// 		mins[i] = e->origin[i] - currentmodel->radius;
+	// 		maxs[i] = e->origin[i] + currentmodel->radius;
+	// 	}
+	// }
+	// else
+	// {
+		SHARED.VectorAdd(e.origin, currentmodel.mins, mins);
+		SHARED.VectorAdd(e.origin, currentmodel.maxs, maxs);
+	// }
+
+	if (CullBox(mins, maxs)) {
+		return;
+	}
+
+	// if (gl_zfix->value)
+	// {
+	// 	glEnable(GL_POLYGON_OFFSET_FILL);
+	// }
+
+	SHARED.VectorSubtract(gl3_newrefdef.vieworg, e.origin, modelorg);
+
+	// if (rotated)
+	// {
+	// 	vec3_t temp;
+	// 	vec3_t forward, right, up;
+
+	// 	VectorCopy(modelorg, temp);
+	// 	AngleVectors(e->angles, forward, right, up);
+	// 	modelorg[0] = DotProduct(temp, forward);
+	// 	modelorg[1] = -DotProduct(temp, right);
+	// 	modelorg[2] = DotProduct(temp, up);
+	// }
+
+
+
+	//glPushMatrix();
+	let oldMat = gl3state.uni3DData.transModelMat4;
+
+	e.angles[0] = -e.angles[0];
+	e.angles[2] = -e.angles[2];
+	WebGL_RotateForEntity(gl, e);
+	e.angles[0] = -e.angles[0];
+	e.angles[2] = -e.angles[2];
+
+	DrawInlineBModel(gl, model);
+
+	// glPopMatrix();
+	gl3state.uni3DData.transModelMat4 = oldMat;
+	WebGL_UpdateUBO3D(gl);
+
+	// if (gl_zfix->value)
+	// {
+	// 	glDisable(GL_POLYGON_OFFSET_FILL);
+	// }
 }
 
 
@@ -347,7 +546,7 @@ function RecursiveWorldNode(model: webglbrushmodel_t, anode: mleaf_or_mode) {
 		if (surf.texinfo.flags & SURF_SKY)
 		{
 			/* just adds to visible sky bounds */
-// 			GL3_AddSkySurface(surf);
+			WebGL_AddSkySurface(surf);
 		}
 		else if (surf.texinfo.flags & (SURF_TRANS33 | SURF_TRANS66))
 		{
@@ -396,10 +595,10 @@ export function WebGL_DrawWorld(gl: WebGL2RenderingContext) {
 
 	gl3state.currenttexture = -1;
 
-	// GL3_ClearSkyBox();
+	WebGL_ClearSkyBox();
 	RecursiveWorldNode(gl3_worldmodel, gl3_worldmodel.nodes[0])
 	DrawTextureChains(gl);
-	// GL3_DrawSkyBox();
+	WebGL_DrawSkyBox(gl);
 	// DrawTriangleOutlines();
 
 	SetCurrentEntity(null)
@@ -425,8 +624,8 @@ export function WebGL_MarkLeaves() {
 		return;
 	}
 
-	// /* development aid to let you run around
-	//    and see exactly where the pvs ends */
+	/* development aid to let you run around
+	   and see exactly where the pvs ends */
 	// if (r_lockpvs->value)
 	// {
 	// 	return;
@@ -435,7 +634,7 @@ export function WebGL_MarkLeaves() {
     IncrGl3VisFramecount()
     SetOldViewCluster(gl3_viewcluster, gl3_viewcluster2)
 
-	// if (r_novis.bool || (gl3_viewcluster == -1) || !gl3_worldmodel.vis)
+	if (r_novis.bool || (gl3_viewcluster == -1) || !gl3_worldmodel.vis)
 	{
 		/* mark everything */
 		for (let i = 0; i < gl3_worldmodel.numleafs; i++) {
@@ -449,50 +648,42 @@ export function WebGL_MarkLeaves() {
 		return;
 	}
 
-	// vis = GL3_Mod_ClusterPVS(gl3_viewcluster, gl3_worldmodel);
+	let vis = WebGL_Mod_ClusterPVS(gl3_viewcluster, gl3_worldmodel);
 
-	// /* may have to combine two clusters because of solid water boundaries */
-	// if (gl3_viewcluster2 != gl3_viewcluster)
-	// {
-	// 	memcpy(fatvis, vis, (gl3_worldmodel->numleafs + 7) / 8);
-	// 	vis = GL3_Mod_ClusterPVS(gl3_viewcluster2, gl3_worldmodel);
-	// 	c = (gl3_worldmodel->numleafs + 31) / 32;
+	/* may have to combine two clusters because of solid water boundaries */
+	let fatvis = new Uint8Array(MAX_MAP_LEAFS/8);
+	if (gl3_viewcluster2 != gl3_viewcluster) {
+		for (let i = 0; i < (gl3_worldmodel.numleafs + 7) / 8; i++) {
+			fatvis[i] = vis[i];
+		}
+		vis = WebGL_Mod_ClusterPVS(gl3_viewcluster2, gl3_worldmodel);
+		for (let i = 0; i < (gl3_worldmodel.numleafs + 7) / 8; i++) {
+			fatvis[i] |= vis[i];
+		}
 
-	// 	for (i = 0; i < c; i++)
-	// 	{
-	// 		((int *)fatvis)[i] |= ((int *)vis)[i];
-	// 	}
+		vis = fatvis;
+	}
 
-	// 	vis = fatvis;
-	// }
+	for (let i = 0; i < gl3_worldmodel.numleafs; i++) {
+		let leaf = gl3_worldmodel.leafs[i];
+		let cluster = leaf.cluster;
 
-	// for (i = 0, leaf = gl3_worldmodel->leafs;
-	// 	 i < gl3_worldmodel->numleafs;
-	// 	 i++, leaf++)
-	// {
-	// 	cluster = leaf->cluster;
+		if (cluster == -1) {
+			continue;
+		}
 
-	// 	if (cluster == -1)
-	// 	{
-	// 		continue;
-	// 	}
+		if (vis[cluster >> 3] & (1 << (cluster & 7))) {
+			let node: mleaf_or_mode = leaf
 
-	// 	if (vis[cluster >> 3] & (1 << (cluster & 7)))
-	// 	{
-	// 		node = (mnode_t *)leaf;
+			do {
+				if (node.visframe == gl3_visframecount) {
+					break;
+				}
 
-	// 		do
-	// 		{
-	// 			if (node->visframe == gl3_visframecount)
-	// 			{
-	// 				break;
-	// 			}
-
-	// 			node->visframe = gl3_visframecount;
-	// 			node = node->parent;
-	// 		}
-	// 		while (node);
-	// 	}
-	// }
+				node.visframe = gl3_visframecount;
+				node = node.parent;
+			} while (node);
+		}
+	}
 }
 

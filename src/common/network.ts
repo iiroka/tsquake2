@@ -24,6 +24,7 @@
  * =======================================================================
  */
 
+import { CL_Drop } from "../client/cl_network"
 import { Com_Printf } from "./clientserver"
 
 // export interface HttpResponse {
@@ -78,6 +79,7 @@ function Network_OpenHandler(ev: Event): any {
 
 function Network_CloseHandler(ev: CloseEvent): any {
     console.log("CloseHandler", ev)
+    CL_Drop()
 }
 
 function Network_ErrorHandler(ev: Event): any {

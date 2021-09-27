@@ -29,6 +29,7 @@ import * as MAIN from "./webgl_main"
 import { Com_Error, Com_Printf } from "../../common/clientserver";
 import { LoadPCX } from "./pcx"
 import { webglimage_t, imagetype_t, WebGL_FindImage, WebGL_Bind } from "./webgl_image"
+import { WebGL_UpdateUBO3D, WebGL_UpdateUBOCommon } from "./webgl_shaders";
 
 export let d_8to24table = new Uint32Array(256);
 
@@ -156,8 +157,6 @@ export function WebGL_Draw_CharScaled(gl: WebGL2RenderingContext, x: number, y: 
 }
 
 export async function WebGL_Draw_FindPic(gl: WebGL2RenderingContext, name: string): Promise<webglimage_t> {
-	// gl3image_t *gl;
-	// char fullname[MAX_QPATH];
 
 	if ((name[0] != '/') && (name[0] != '\\')) {
 		let fullname = `pics/${name}.pcx`;
@@ -202,6 +201,44 @@ export async function WebGL_Draw_PicScaled(gl: WebGL2RenderingContext, x: number
 
 	drawTexturedRectangle(gl, x, y, pic.width*factor, pic.height*factor, pic.sl, pic.tl, pic.sh, pic.th);
 }
+
+/*
+ * Fills a box of pixels with a single color
+ */
+export function WebGL_Draw_Fill(gl: WebGL2RenderingContext, x: number, y: number, w: number, h: number, c: number) {
+
+	if ( c < 0 || c > 255) {
+		Com_Error(SHARED.ERR_FATAL, "Draw_Fill: bad color");
+	}
+
+	const color = d_8to24table[c];
+
+	const vBuf = new Float32Array([
+	//  X,   Y
+		x,   y+h,
+		x,   y,
+		x+w, y+h,
+		x+w, y
+	]);
+
+	MAIN.gl3state.uniCommonData.color = [
+		(color & 0xFF) / 255,
+		((color >> 8) & 0xFF) / 255,
+		((color >> 16) & 0xFF) / 255,
+		1.0
+	]
+
+	WebGL_UpdateUBOCommon(gl);
+
+	MAIN.gl3state.UseProgram(gl, MAIN.gl3state.si2Dcolor.shaderProgram);
+	MAIN.gl3state.BindVAO(gl, vao2Dcolor);
+
+	MAIN.gl3state.BindVBO(gl, vbo2D);
+	gl.bufferData(gl.ARRAY_BUFFER, vBuf, gl.STREAM_DRAW);
+
+	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
 
 export async function WebGL_Draw_GetPalette() {
 

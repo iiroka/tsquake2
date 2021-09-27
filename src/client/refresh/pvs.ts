@@ -23,7 +23,50 @@
  *
  * =======================================================================
  */
+import { MAX_MAP_LEAFS } from "../../common/filesystem";
 import * as SHARED from "../../common/shared"
+
+/*
+===================
+Mod_DecompressVis
+===================
+*/
+export function Mod_DecompressVis(ind: Uint8Array, ini: number, row: number): Uint8Array {
+	// YQ2_ALIGNAS_TYPE(int) static byte decompressed[MAX_MAP_LEAFS / 8];
+	// int c;
+	// byte *out;
+
+	// out = decompressed;
+	let decompressed = new Uint8Array(MAX_MAP_LEAFS/8);
+
+	if (ind == null) {
+		/* no vis info, so make all visible */
+		for (let i = 0; i < row; i++) {
+			decompressed[i] = 0xff;
+		}
+
+		return decompressed;
+	}
+
+	let index = 0
+	do
+	{
+		if (ind[ini]) {
+			decompressed[index++] = ind[ini++]
+			continue;
+		}
+
+		let c = ind[ini+1];
+		ini += 2;
+
+		while (c > 0) {
+			decompressed[index++] = 0;
+			c--;
+		}
+	} while (index < row);
+
+	return decompressed;
+}
 
 export function Mod_RadiusFromBounds(mins: number[], maxs: number[]): number {
 

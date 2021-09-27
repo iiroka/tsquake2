@@ -112,6 +112,84 @@ export class cvar_t {
     }
 }
 
+/*
+ * ==============================================================
+ *
+ * COLLISION DETECTION
+ *
+ * ==============================================================
+ */
+
+/* lower bits are stronger, and will eat weaker brushes completely */
+export const CONTENTS_SOLID = 1                /* an eye is never valid in a solid */
+export const CONTENTS_WINDOW = 2               /* translucent, but not watery */
+export const CONTENTS_AUX = 4
+export const CONTENTS_LAVA = 8
+export const CONTENTS_SLIME = 16
+export const CONTENTS_WATER = 32
+export const CONTENTS_MIST = 64
+export const LAST_VISIBLE_CONTENTS = 64
+
+/* remaining contents are non-visible, and don't eat brushes */
+export const CONTENTS_AREAPORTAL = 0x8000
+
+export const CONTENTS_PLAYERCLIP = 0x10000
+export const CONTENTS_MONSTERCLIP = 0x20000
+
+/* currents can be added to any other contents, and may be mixed */
+export const CONTENTS_CURRENT_0 = 0x40000
+export const CONTENTS_CURRENT_90 = 0x80000
+export const CONTENTS_CURRENT_180 = 0x100000
+export const CONTENTS_CURRENT_270 = 0x200000
+export const CONTENTS_CURRENT_UP = 0x400000
+export const CONTENTS_CURRENT_DOWN = 0x800000
+
+export const CONTENTS_ORIGIN = 0x1000000           /* removed before bsping an entity */
+
+export const CONTENTS_MONSTER = 0x2000000          /* should never be on a brush, only in game */
+export const CONTENTS_DEADMONSTER = 0x4000000
+export const CONTENTS_DETAIL = 0x8000000           /* brushes to be added after vis leafs */
+export const CONTENTS_TRANSLUCENT = 0x10000000     /* auto set if any surface has trans */
+export const CONTENTS_LADDER = 0x20000000
+
+export const SURF_LIGHT = 0x1          /* value will hold the light strength */
+
+export const SURF_SLICK = 0x2          /* effects game physics */
+
+export const SURF_SKY = 0x4            /* don't draw, but add to skybox */
+export const SURF_WARP = 0x8           /* turbulent water warp */
+export const SURF_TRANS33 = 0x10
+export const SURF_TRANS66 = 0x20
+export const SURF_FLOWING = 0x40       /* scroll towards angle */
+export const SURF_NODRAW = 0x80        /* don't bother referencing the texture */
+
+
+/* content masks */
+export const MASK_ALL = -1
+export const MASK_SOLID = CONTENTS_SOLID | CONTENTS_WINDOW
+export const MASK_PLAYERSOLID =
+	CONTENTS_SOLID | CONTENTS_PLAYERCLIP |	
+	CONTENTS_WINDOW | CONTENTS_MONSTER
+export const MASK_DEADSOLID = CONTENTS_SOLID | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW
+export const MASK_MONSTERSOLID =
+	CONTENTS_SOLID | CONTENTS_MONSTERCLIP |
+	CONTENTS_WINDOW | CONTENTS_MONSTER
+export const MASK_WATER = CONTENTS_WATER | CONTENTS_LAVA | CONTENTS_SLIME
+export const MASK_OPAQUE = CONTENTS_SOLID | CONTENTS_SLIME | CONTENTS_LAVA
+export const MASK_SHOT =
+	CONTENTS_SOLID | CONTENTS_MONSTER | CONTENTS_WINDOW |
+	CONTENTS_DEADMONSTER
+export const MASK_CURRENT =
+	CONTENTS_CURRENT_0 | CONTENTS_CURRENT_90 |
+	CONTENTS_CURRENT_180 | CONTENTS_CURRENT_270 |
+	CONTENTS_CURRENT_UP |
+	CONTENTS_CURRENT_DOWN
+
+/* gi.BoxEdicts() can return a list of either solid or trigger entities */
+export const AREA_SOLID = 1
+export const AREA_TRIGGERS = 2
+
+
 /* plane_t structure */
 export class cplane_t {
 	normal = [0,0,0]
@@ -119,6 +197,34 @@ export class cplane_t {
 	type = 0 /* for fast side tests */
 	signbits = 0 /* signx + (signy<<1) + (signz<<2) */
 	// byte pad[2];
+
+	copy(other: cplane_t) {
+		this.normal[0] = other.normal[0]
+		this.normal[1] = other.normal[1]
+		this.normal[2] = other.normal[2]
+		this.dist = other.dist
+		this.type = other.type
+		this.signbits = other.signbits
+	}
+}
+
+export class cmodel_t {
+	mins = [0,0,0]
+	maxs = [0,0,0]
+	origin = [0,0,0] /* for sounds or lights */
+	headnode = 0;
+}
+
+export class csurface_t {
+	name: string = ""
+	flags = 0; /* SURF_* */
+	value = 0; /* unused */
+}
+
+
+export class mapsurface_t {  /* used internally due to name len probs */
+	c = new csurface_t()
+	rname: string = ""
 }
 
 
@@ -203,6 +309,19 @@ export class usercmd_t {
     }
 }
 
+/* a trace is returned when a box is swept through the world */
+export class trace_t {
+	allsolid = false      /* if true, plane is not valid */
+	startsolid = false    /* if true, the initial point was in a solid area */
+	fraction = 0         /* time completed, 1.0 = didn't hit anything */
+	endpos = [0,0,0]          /* final position */
+	plane = new cplane_t()         /* surface normal at impact */
+	surface: csurface_t = null    /* surface hit */
+	contents = 0           /* contents on other side of surface hit */
+	ent: object = null    /* not set by CM_*() functions */
+} ;
+
+
 export const MAXTOUCH = 32
 export class pmove_t {
 	/* state (in / out) */
@@ -223,13 +342,13 @@ export class pmove_t {
     mins = [0,0,0]
     maxs = [0,0,0]
 
-	// struct edict_s *groundentity;
+	groundentity: object = null
 	watertype = 0
 	waterlevel = 0
 
 	/* callbacks to test the world */
-	// trace_t (*trace)(vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end);
-	// int (*pointcontents)(vec3_t point);
+	trace: (start: number[], staminsrt: number[], maxs: number[], end: number[]) => trace_t
+	pointcontents: (point: number[]) => number
 }
 
 /* entity_state_t->effects
@@ -553,6 +672,69 @@ export const MZ2_WIDOW2_BEAM_SWEEP_8 = 207
 export const MZ2_WIDOW2_BEAM_SWEEP_9 = 208
 export const MZ2_WIDOW2_BEAM_SWEEP_10 = 209
 export const MZ2_WIDOW2_BEAM_SWEEP_11 = 210
+
+/* Temp entity events are for things that happen
+ * at a location seperate from any existing entity.
+ * Temporary entity messages are explicitly constructed
+ * and broadcast. */
+export enum temp_event_t {
+	TE_GUNSHOT = 0,
+	TE_BLOOD,
+	TE_BLASTER,
+	TE_RAILTRAIL,
+	TE_SHOTGUN,
+	TE_EXPLOSION1,
+	TE_EXPLOSION2,
+	TE_ROCKET_EXPLOSION,
+	TE_GRENADE_EXPLOSION,
+	TE_SPARKS,
+	TE_SPLASH,
+	TE_BUBBLETRAIL,
+	TE_SCREEN_SPARKS,
+	TE_SHIELD_SPARKS,
+	TE_BULLET_SPARKS,
+	TE_LASER_SPARKS,
+	TE_PARASITE_ATTACK,
+	TE_ROCKET_EXPLOSION_WATER,
+	TE_GRENADE_EXPLOSION_WATER,
+	TE_MEDIC_CABLE_ATTACK,
+	TE_BFG_EXPLOSION,
+	TE_BFG_BIGEXPLOSION,
+	TE_BOSSTPORT,           /* used as '22' in a map, so DON'T RENUMBER!!! */
+	TE_BFG_LASER,
+	TE_GRAPPLE_CABLE,
+	TE_WELDING_SPARKS,
+	TE_GREENBLOOD,
+	TE_BLUEHYPERBLASTER,
+	TE_PLASMA_EXPLOSION,
+	TE_TUNNEL_SPARKS,
+	TE_BLASTER2,
+	TE_RAILTRAIL2,
+	TE_FLAME,
+	TE_LIGHTNING,
+	TE_DEBUGTRAIL,
+	TE_PLAIN_EXPLOSION,
+	TE_FLASHLIGHT,
+	TE_FORCEWALL,
+	TE_HEATBEAM,
+	TE_MONSTER_HEATBEAM,
+	TE_STEAM,
+	TE_BUBBLETRAIL2,
+	TE_MOREBLOOD,
+	TE_HEATBEAM_SPARKS,
+	TE_HEATBEAM_STEAM,
+	TE_CHAINFIST_SMOKE,
+	TE_ELECTRIC_SPARKS,
+	TE_TRACKER_EXPLOSION,
+	TE_TELEPORT_EFFECT,
+	TE_DBALL_GOAL,
+	TE_WIDOWBEAMOUT,
+	TE_NUKEBLAST,
+	TE_WIDOWSPLASH,
+	TE_EXPLOSION1_BIG,
+	TE_EXPLOSION1_NP,
+	TE_FLECHETTE
+}
 
 
 /* player_state->stats[] indexes */
@@ -1042,6 +1224,13 @@ export function AngleVectors(angles: number[], forward: number[], right: number[
 	}
 }
 
+export function VectorMA(veca: number[], scale: number, vecb: number[], vecc: number[])
+{
+	vecc[0] = veca[0] + scale * vecb[0];
+	vecc[1] = veca[1] + scale * vecb[1];
+	vecc[2] = veca[2] + scale * vecb[2];
+}
+
 export function DotProduct(v1: number[], v2: number[]): number {
 	return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
 }
@@ -1184,4 +1373,21 @@ export function COM_Parse(data: string, index: number): COM_Parse_Result {
  */
 export function randk(): number {
 	return ~~(Math.random() * 32768);
+}
+
+/*
+ * Generate a pseudorandom
+ * signed float between 
+ * 0 and 1.
+ */
+export function frandk() {
+	return Math.random()
+}
+
+/* Generate a pseudorandom
+ * float between -1 and 1.
+ */
+export function crandk()
+{
+	return (Math.random() * 2.0) - 1.0;
 }

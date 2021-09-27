@@ -27,27 +27,32 @@ import * as SHARED from "../common/shared"
 import { Com_Error, Com_Printf } from "../common/clientserver";
 import { cl, cls, cl_paused } from "./cl_main";
 import { SCR_UpdateScreen, scr_vrect, SCR_TouchPics } from "./cl_screen";
-import { R_BeginRegistration, R_RegisterModel, R_RenderFrame, Draw_FindPic } from "./vid"
+import { R_BeginRegistration, R_RegisterModel, R_RenderFrame, Draw_FindPic, R_SetSky } from "./vid"
 import { connstate_t, MAX_CLIENTWEAPONMODELS } from "./client";
 import { CL_AddEntities } from "./cl_entities"
 import { CL_LoadClientinfo, CL_ParseClientinfo } from "./cl_parse";
-import { entity_t, lightstyle_t, MAX_ENTITIES } from "./ref";
+import { dlight_t, entity_t, lightstyle_t, MAX_DLIGHTS, MAX_ENTITIES, MAX_PARTICLES, particle_t } from "./ref";
 import { Key_Update } from "./cl_keyboard";
 import { CL_RegisterTEntModels } from "./cl_tempentities"
+import { CM_InlineModel } from "../common/collision";
+
+export let gun_frame = 0
+export let gun_model: object = null
 
 export let cl_weaponmodels: string[] = []
 
 let r_entities: entity_t[] = []
 let r_lightstyles: lightstyle_t[] = new Array<lightstyle_t>(SHARED.MAX_LIGHTSTYLES)
+let r_particles: particle_t[] = []
+let r_dlights: dlight_t[] = []
 
 /*
  * Specifies the model that will be used as the world
  */
 function V_ClearScene() {
     r_entities = []
-	// r_numdlights = 0;
-	// r_numentities = 0;
-	// r_numparticles = 0;
+	r_dlights = []
+	r_particles = []
 }
 
 export function V_AddEntity(ent: entity_t) {
@@ -57,6 +62,35 @@ export function V_AddEntity(ent: entity_t) {
 
 	r_entities.push(ent.clone())
 }
+
+export function V_AddParticle(org: number[], color: number, alpha: number) {
+
+	if (r_particles.length >= MAX_PARTICLES) {
+		return;
+	}
+
+	let p = new particle_t()
+	SHARED.VectorCopy(org, p.origin);
+	p.color = ~~color;
+	p.alpha = alpha;
+	r_particles.push(p)
+}
+
+export function V_AddLight(org: number[], intensity: number, r: number, g: number, b: number) {
+
+	if (r_dlights.length >= MAX_DLIGHTS) {
+		return;
+	}
+
+	let dl = new dlight_t();
+	SHARED.VectorCopy(org, dl.origin);
+	dl.intensity = intensity;
+	dl.color[0] = r;
+	dl.color[1] = g;
+	dl.color[2] = b;
+	r_dlights.push(dl);
+}
+
 
 export function V_AddLightStyle(style: number, r: number, g: number, b: number) {
 
@@ -128,11 +162,11 @@ export async function CL_PrepRefresh() {
 		} else {
 			cl.model_draw[i] = await R_RegisterModel(cl.configstrings[SHARED.CS_MODELS + i])
 
-// 			if (name[0] == '*') {
-// 				cl.model_clip[i] = CM_InlineModel(cl.configstrings[CS_MODELS + i]);
-// 			} else {
-// 				cl.model_clip[i] = NULL;
-// 			}
+			if (name[0] == '*') {
+				cl.model_clip[i] = CM_InlineModel(cl.configstrings[SHARED.CS_MODELS + i]);
+			} else {
+				cl.model_clip[i] = null;
+			}
 		}
 
 		if (name[0] != '*') {
@@ -173,7 +207,7 @@ export async function CL_PrepRefresh() {
     if (axisStrs.length > 0) axis[0] = parseFloat(axisStrs[0])
     if (axisStrs.length > 1) axis[1] = parseFloat(axisStrs[1])
     if (axisStrs.length > 2) axis[2] = parseFloat(axisStrs[2])
-// 	R_SetSky(cl.configstrings[CS_SKY], rotate, axis);
+	await R_SetSky(cl.configstrings[SHARED.CS_SKY], rotate, axis);
 	Com_Printf("                                     \r");
 
 	/* the renderer can now free unneeded stuff */
@@ -310,8 +344,8 @@ export async function V_RenderView(stereo_separation: number) {
 		// }
 
 		cl.refdef.entities = r_entities
-		// cl.refdef.particles = r_particles;
-		// cl.refdef.dlights = r_dlights;
+		cl.refdef.particles = r_particles;
+		cl.refdef.dlights = r_dlights;
 		cl.refdef.lightstyles = r_lightstyles;
 
 		cl.refdef.rdflags = cl.frame.playerstate.rdflags;

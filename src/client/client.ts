@@ -36,6 +36,10 @@ export const CMD_BACKUP = 256 /* allow a lot of command backups for very fast sy
    it can be un-deltad from the original */
 export const MAX_PARSE_ENTITIES	= 1024
 
+export const PARTICLE_GRAVITY = 40
+export const BLASTER_PARTICLE_COLOR = 0xe0
+export const INSTANT_PARTICLE = -10000.0
+
 export class frame_t {
 	valid: boolean = false /* cleared if delta parsing was invalid */
 	serverframe: number = 0
@@ -123,9 +127,9 @@ export class client_state_t {
     v_right = [0,0,0]
     v_up = [0,0,0]
    
-    //    /* transient data from server */
-    //    char		layout[1024]; /* general 2D overlay */
-    //    int			inventory[MAX_ITEMS];
+    /* transient data from server */
+    layout = ""; /* general 2D overlay */
+    inventory = new Array<number>(SHARED.MAX_ITEMS);
    
     /* non-gameserver infornamtion */
     cinematic_buf: Uint8Array
@@ -148,7 +152,7 @@ export class client_state_t {
    
     model_draw: object[] = []
    
-    //    struct cmodel_s	*model_clip[MAX_MODELS];
+    model_clip = new Array<SHARED.cmodel_t>(SHARED.MAX_MODELS)
    
     //    struct sfx_s	*sound_precache[MAX_SOUNDS];
    
@@ -212,8 +216,8 @@ export class client_static_t {
                           /* or changing rendering dlls */
 
     /* if time gets > 30 seconds ahead, break it */
-    // int			disable_servercount; /* when we receive a frame and cl.servercount */
-    //                                 /* > cls.disable_servercount, clear disable_screen */
+    disable_servercount = 0 /* when we receive a frame and cl.servercount */
+                                    /* > cls.disable_servercount, clear disable_screen */
 
     /* connection information */
     servername = ""; /* name of server from original connect */

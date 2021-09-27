@@ -322,13 +322,11 @@ export function WebGL_LoadPic(gl: WebGL2RenderingContext, name: string, pic: Uin
 	image.height = height;
 	image.type = type;
 
-	// if ((type == it_skin) && (bits == 8))
-	// {
+	// if ((type == it_skin) && (bits == 8)) {
 	// 	FloodFillSkin(pic, width, height);
-
 	// }
 
-	// // image->scrap = false; // TODO: reintroduce scrap? would allow optimizations in 2D rendering..
+	// image->scrap = false; // TODO: reintroduce scrap? would allow optimizations in 2D rendering..
 
     image.tex = gl.createTexture()
 

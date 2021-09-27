@@ -35,6 +35,7 @@ import { Cmd_TokenizeString } from "../common/cmdparser";
 import { Cvar_VariableString, Cvar_ClearUserinfoModified, Cvar_Userinfo } from "../common/cvar";
 import { CL_ParseServerMessage } from "./cl_parse"
 import { QWritebuf } from "../common/writebuf";
+import { SCR_BeginLoadingPlaque, SCR_EndLoadingPlaque } from "./cl_screen";
 
 export async function CL_ForwardToServer_f(args: string[]) {
 	if ((cls.state != connstate_t.ca_connected) && (cls.state != connstate_t.ca_active)) {
@@ -71,9 +72,9 @@ export function CL_Drop() {
 	CL_Disconnect();
 
 	/* drop loading plaque unless this is the initial game start */
-	// if (cls.disable_servercount != -1) {
-	// 	SCR_EndLoadingPlaque();  /* get rid of loading plaque */
-	// }
+	if (cls.disable_servercount != -1) {
+		SCR_EndLoadingPlaque();  /* get rid of loading plaque */
+	}
 }
 
 
@@ -246,7 +247,7 @@ export async function CL_Changing_f(args: string[]) {
 	// 	return;
 	// }
 
-	// SCR_BeginLoadingPlaque();
+	await SCR_BeginLoadingPlaque();
 	cls.state = connstate_t.ca_connected; /* not active anymore, but not disconnected */
 	Com_Printf("\nChanging map...\n");
 

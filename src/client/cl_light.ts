@@ -24,8 +24,9 @@
  * =======================================================================
  */
 import * as SHARED from "../common/shared"
-import { cl } from "./cl_main"
-import { V_AddLightStyle } from "./cl_view"
+import { cl, cls } from "./cl_main"
+import { V_AddLight, V_AddLightStyle } from "./cl_view"
+import { MAX_DLIGHTS } from "./ref"
 
 
 class clightstyle_t {
@@ -87,3 +88,97 @@ export function CL_AddLightStyles() {
         V_AddLightStyle(i, cl_lightstyle[i].value[0], cl_lightstyle[i].value[1], cl_lightstyle[i].value[2])
 	}
 }
+
+class cdlight_t {
+	key: number = 0 /* so entities can reuse same entry */
+	color = [0,0,0]
+	origin = [0,0,0]
+	radius = 0
+	die = 0 /* stop lighting after this time */
+	decay = 0 /* drop this each second */
+	minlight = 0 /* don't add when contributing less */
+}
+
+let cl_dlights = new Array<cdlight_t>(MAX_DLIGHTS)
+
+export function CL_ClearDlights()
+{
+	for (let i = 0; i < MAX_DLIGHTS; i++) {
+		cl_dlights[i] = new cdlight_t();
+	}
+}
+
+export function CL_AllocDlight(key: number): cdlight_t {
+
+	/* first look for an exact key match */
+	if (key) {
+
+		for (let i = 0; i < MAX_DLIGHTS; i++) {
+			if (cl_dlights[i].key == key) {
+				return cl_dlights[i];
+			}
+		}
+	}
+
+	/* then look for anything else */
+	for (let i = 0; i < MAX_DLIGHTS; i++) {
+		if (cl_dlights[i].die < cl.time) {
+			cl_dlights[i].key = key;
+			return cl_dlights[i];
+		}
+	}
+
+	cl_dlights[0].key = key;
+	return cl_dlights[0];
+}
+
+// void
+// CL_NewDlight(int key, float x, float y, float z, float radius, float time)
+// {
+// 	cdlight_t *dl;
+
+// 	dl = CL_AllocDlight(key);
+// 	dl->origin[0] = x;
+// 	dl->origin[1] = y;
+// 	dl->origin[2] = z;
+// 	dl->radius = radius;
+// 	dl->die = cl.time + time;
+// }
+
+export function CL_RunDLights() {
+
+	for (let i = 0; i < MAX_DLIGHTS && cl_dlights[i] != null; i++)
+	{
+		let dl = cl_dlights[i];
+		if (!dl.radius) {
+			continue;
+		}
+
+		if (dl.die < cl.time) {
+			dl.radius = 0;
+			continue;
+		}
+
+		dl.radius -= cls.rframetime * dl.decay;
+
+		if (dl.radius < 0) {
+			dl.radius = 0;
+		}
+	}
+}
+
+export function CL_AddDLights() {
+	// cdlight_t *dl;
+
+	// dl = cl_dlights;
+
+	for (let i = 0; i < MAX_DLIGHTS; i++) {
+		let dl = cl_dlights[i];
+		if (!dl.radius) {
+			continue;
+		}
+
+		V_AddLight(dl.origin, dl.radius, dl.color[0], dl.color[1], dl.color[2]);
+	}
+}
+

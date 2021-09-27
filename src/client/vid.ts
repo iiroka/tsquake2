@@ -262,6 +262,11 @@ export function Draw_CharScaled(x: number, y: number, num: number, scale: number
     re?.DrawCharScaled(x, y, num, scale);
 }
 
+export function Draw_Fill(x: number, y: number, w: number, h: number, c: number) {
+	re?.DrawFill(x, y, w, h, c);
+}
+
+
 export function VID_StartRendering() {
     re?.Start()
 }
@@ -292,4 +297,8 @@ export async function R_RegisterSkin(name: string): Promise<object> {
 
 export async function R_RenderFrame(r: refdef_t) {
 	await re?.RenderFrame(r);
+}
+
+export async function R_SetSky(name: string, rotate: number, axis: number[]) {
+	await re?.SetSky(name, rotate, axis);
 }

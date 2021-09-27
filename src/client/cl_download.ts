@@ -32,6 +32,7 @@ import { connstate_t } from "./client"
 import { cl, cls } from "./cl_main"
 import { CL_QueueHTTPDownload, CL_PendingHTTPDownloads } from "./download"
 import { CL_PrepRefresh } from "./cl_view"
+import { CM_LoadMap } from "../common/collision"
 
 /* This - and some more code down below - is the 'Crazy Fallback
    Magic'. First we're trying to download all files over HTTP with
@@ -405,7 +406,8 @@ export async function CL_RequestNextDownload() {
 // 		precache_check = ENV_CNT + 1;
 // 	}
 
-// 	CM_LoadMap(cl.configstrings[CS_MODELS + 1], true, &map_checksum);
+    let map_checksum = [0]
+    await CM_LoadMap(cl.configstrings[SHARED.CS_MODELS + 1], true, map_checksum);
 
 // 	if (map_checksum != (int)strtol(cl.configstrings[CS_MAPCHECKSUM], (char **)NULL, 10))
 // 	{

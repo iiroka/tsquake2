@@ -34,10 +34,14 @@ import { Cbuf_AddText, Cbuf_Execute } from "../common/cmdparser";
 import { clientinfo_t, connstate_t, frame_t, MAX_PARSE_ENTITIES } from "./client";
 import { SCR_PlayCinematic } from "./cl_cin"
 import { CL_ParseDownload } from "./cl_download"
-import { R_RegisterModel, R_RegisterSkin } from "./vid";
+import { Draw_FindPic, R_RegisterModel, R_RegisterSkin } from "./vid";
 import { cl_weaponmodels } from "./cl_view";
 import { CL_SetLightstyle } from "./cl_light";
 import { CL_CheckPredictionError } from "./cl_prediction"
+import { CM_InlineModel } from "../common/collision";
+import { SCR_EndLoadingPlaque } from "./cl_screen";
+import { CL_ParseTEnt } from "./cl_tempentities"
+import { CL_AddMuzzleFlash, CL_AddMuzzleFlash2 } from "./cl_effects";
 
 const svc_strings: string[] = [
 	"svc_bad",
@@ -676,10 +680,10 @@ function CL_ParseFrame(msg: QReadbuf) {
 			cl.predicted_origin[2] = cl.frame.playerstate.pmove.origin[2] * 0.125;
 			SHARED.VectorCopy(cl.frame.playerstate.viewangles, cl.predicted_angles);
 
-	// 		if ((cls.disable_servercount != cl.servercount) && cl.refresh_prepped)
-	// 		{
-	// 			SCR_EndLoadingPlaque();  /* get rid of loading plaque */
-	// 		}
+			if ((cls.disable_servercount != cl.servercount) && cl.refresh_prepped)
+			{
+				SCR_EndLoadingPlaque();  /* get rid of loading plaque */
+			}
 
 	// 		cl.sound_prepped = true;
 
@@ -803,7 +807,7 @@ export async function CL_LoadClientinfo(ci: clientinfo_t, s: string) {
 	// 	memset(ci->weaponmodel, 0, sizeof(ci->weaponmodel));
 		ci.weaponmodel[0] = await R_RegisterModel(weapon_filename);
 		ci.skin = await R_RegisterSkin(skin_filename);
-	// 	ci->icon = Draw_FindPic(ci->iconname);
+		ci.icon = await Draw_FindPic(ci.iconname);
 	}
 	else
 	{
@@ -878,7 +882,7 @@ export async function CL_LoadClientinfo(ci: clientinfo_t, s: string) {
 
 		/* icon file */
 	    ci.iconname = `/players/${model_name}/${skin_name}_i.pcx`;
-	// 	ci->icon = Draw_FindPic(ci->iconname);
+		ci.icon = Draw_FindPic(ci.iconname);
 	}
 
 	// /* must have loaded all data types to be valid */
@@ -914,13 +918,7 @@ async function CL_ParseConfigString(msg: QReadbuf) {
 
 	let s = msg.ReadString();
 
-	// Q_strlcpy(olds, cl.configstrings[i], sizeof(olds));
-
-	// length = strlen(s);
-	// if (length > sizeof(cl.configstrings) - sizeof(cl.configstrings[0])*i - 1)
-	// {
-	// 	Com_Error(ERR_DROP, "CL_ParseConfigString: oversize configstring");
-	// }
+    let olds = cl.configstrings[i];
 
 	cl.configstrings[i] = s;
 
@@ -933,20 +931,20 @@ async function CL_ParseConfigString(msg: QReadbuf) {
 	// 		OGG_PlayTrack((int)strtol(cl.configstrings[CS_CDTRACK], (char **)NULL, 10));
 	// 	}
 	} else if ((i >= SHARED.CS_MODELS) && (i < SHARED.CS_MODELS + SHARED.MAX_MODELS)) {
-	// 	if (cl.refresh_prepped)
-	// 	{
-	// 		cl.model_draw[i - CS_MODELS] = (cl.configstrings[i]);
+		if (cl.refresh_prepped)
+		{
+			cl.model_draw[i - SHARED.CS_MODELS] = await R_RegisterModel(cl.configstrings[i]);
 
-	// 		if (cl.configstrings[i][0] == '*')
-	// 		{
-	// 			cl.model_clip[i - CS_MODELS] = CM_InlineModel(cl.configstrings[i]);
-	// 		}
+			if (cl.configstrings[i][0] == '*')
+			{
+				cl.model_clip[i - SHARED.CS_MODELS] = CM_InlineModel(cl.configstrings[i]);
+			}
 
-	// 		else
-	// 		{
-	// 			cl.model_clip[i - CS_MODELS] = NULL;
-	// 		}
-	// 	}
+			else
+			{
+				cl.model_clip[i - SHARED.CS_MODELS] = null;
+			}
+		}
 	} else if ((i >= SHARED.CS_SOUNDS) && (i < SHARED.CS_SOUNDS + SHARED.MAX_MODELS)) {
 	// 	if (cl.refresh_prepped)
 	// 	{
@@ -954,15 +952,15 @@ async function CL_ParseConfigString(msg: QReadbuf) {
 	// 			S_RegisterSound(cl.configstrings[i]);
 	// 	}
 	} else if ((i >= SHARED.CS_IMAGES) && (i < SHARED.CS_IMAGES + SHARED.MAX_MODELS)) {
-	// 	if (cl.refresh_prepped)
-	// 	{
-	// 		cl.image_precache[i - CS_IMAGES] = Draw_FindPic(cl.configstrings[i]);
-	// 	}
+		if (cl.refresh_prepped)
+		{
+			cl.image_precache[i - SHARED.CS_IMAGES] = await Draw_FindPic(cl.configstrings[i]);
+		}
 	} else if ((i >= SHARED.CS_PLAYERSKINS) && (i < SHARED.CS_PLAYERSKINS + SHARED.MAX_CLIENTS)) {
-	// 	if (cl.refresh_prepped && strcmp(olds, s))
-	// 	{
-	// 		CL_ParseClientinfo(i - CS_PLAYERSKINS);
-	// 	}
+		if (cl.refresh_prepped && olds != s)
+		{
+			CL_ParseClientinfo(i - SHARED.CS_PLAYERSKINS);
+		}
 	}
 }
 
@@ -1076,17 +1074,17 @@ export async function CL_ParseServerMessage(msg: QReadbuf) {
 				CL_ParseBaseline(msg);
 				break;
 
-			// case svc_temp_entity:
-			// 	CL_ParseTEnt();
-			// 	break;
+			case svc_ops_e.svc_temp_entity:
+				CL_ParseTEnt(msg);
+				break;
 
-			// case svc_muzzleflash:
-			// 	CL_AddMuzzleFlash();
-			// 	break;
+			case svc_ops_e.svc_muzzleflash:
+				CL_AddMuzzleFlash(msg);
+				break;
 
-			// case svc_muzzleflash2:
-			// 	CL_AddMuzzleFlash2();
-			// 	break;
+			case svc_ops_e.svc_muzzleflash2:
+				CL_AddMuzzleFlash2(msg);
+				break;
 
 			case svc_ops_e.svc_download:
 				CL_ParseDownload(msg);
@@ -1112,7 +1110,7 @@ export async function CL_ParseServerMessage(msg: QReadbuf) {
 				break;
 
 			default:
-				Com_Error(SHARED.ERR_DROP, "CL_ParseServerMessage: Illegible server message\n");
+				Com_Error(SHARED.ERR_DROP, `CL_ParseServerMessage: Illegible server message ${cmd}\n`);
 				break;
 		}
 	}

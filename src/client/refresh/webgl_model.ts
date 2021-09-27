@@ -28,7 +28,7 @@ import * as SHARED from "../../common/shared"
 import * as FS from "../../common/filesystem"
 import { Com_Error, Com_Printf } from "../../common/clientserver"
 import { ClearViewCluster, gl3state, WebGL_SetWorldModel } from "./webgl_main"
-import { Mod_RadiusFromBounds } from "./pvs"
+import { Mod_DecompressVis, Mod_RadiusFromBounds } from "./pvs"
 import { imagetype_t, webglimage_t, WebGL_FindImage } from "./webgl_image"
 import { WebGL_LM_BeginBuildingLightmaps, WebGL_LM_EndBuildingLightmaps, WebGL_LM_CreateSurfaceLightmap, MAX_LIGHTMAPS_PER_SURFACE, WebGL_LM_BuildPolygonFromSurface } from "./webgl_lightmap"
 import { gl3_notexture } from "./webgl_misc"
@@ -105,13 +105,19 @@ const MAX_MOD_KNOWN = 512
 export let registration_sequence = 0
 let mod_known: webglmodel_t[] = []
 let mod_inline: webglmodel_t[] = []
+let mod_novis = new Uint8Array(FS.MAX_MAP_LEAFS/8)
 
 export function WebGL_Mod_Init() {
     registration_sequence = 1
-    // memset(mod_novis, 0xff, sizeof(mod_novis));
+    for (let i = 0; i < mod_novis.length; i++) {
+        mod_novis[i] = 0xFF
+    }
 }
 
 export function WebGL_Mod_PointInLeaf(p: number[], model: webglbrushmodel_t): mleaf_t {
+	// mnode_t *node;
+	// float d;
+	// cplane_t *plane;
 
 	if (!model || model.nodes == null || model.nodes.length == 0) {
 		Com_Error(SHARED.ERR_DROP, "WebGL_Mod_PointInLeaf: bad model");
@@ -136,6 +142,15 @@ export function WebGL_Mod_PointInLeaf(p: number[], model: webglbrushmodel_t): ml
 			anode = node.children[1];
 		}
 	}
+}
+
+export function WebGL_Mod_ClusterPVS(cluster: number, model: webglbrushmodel_t): Uint8Array {
+	if ((cluster == -1) || !model.vis) {
+		return mod_novis;
+	}
+
+	return Mod_DecompressVis(model.visdata, model.vis.bitofs[cluster][FS.DVIS_PVS],
+			(model.vis.numclusters + 7) >> 3);
 }
 
 
@@ -358,6 +373,13 @@ export class gl3_3D_vtx_t {
         this.data[this.offset + 1] = v[1]
         this.data[this.offset + 2] = v[2]
     }
+    get pos(): number[] {
+        return [
+            this.data[this.offset + 0],
+            this.data[this.offset + 1],
+            this.data[this.offset + 2]
+        ]
+    }
     set texCoord(v: number[]) {
         this.data[this.offset + 3] = v[0]
         this.data[this.offset + 4] = v[1]
@@ -381,8 +403,8 @@ export class gl3_3D_vtx_t {
 	// float lmTexCoord[2]; // lightmap texture coordinate (sometimes unused)
 	// vec3_t normal;
 	// GLuint lightFlags; // bit i set means: dynlight i affects surface
-    data: Float32Array
-    offset: number
+    private data: Float32Array
+    private offset: number
 
     constructor(data: Float32Array, offset: number) {
         this.data = data 
@@ -393,10 +415,40 @@ export class gl3_3D_vtx_t {
 
 // used for vertex array elements when drawing models
 export class gl3_alias_vtx_t {
+    set pos(v: number[]) {
+        this.data[this.offset + 0] = v[0]
+        this.data[this.offset + 1] = v[1]
+        this.data[this.offset + 2] = v[2]
+    }
+    set texCoord(v: number[]) {
+        this.data[this.offset + 3] = v[0]
+        this.data[this.offset + 4] = v[1]
+    }
+    set color(v: number[]) {
+        this.data[this.offset + 5] = v[0]
+        this.data[this.offset + 6] = v[1]
+        this.data[this.offset + 7] = v[2]
+        this.data[this.offset + 8] = v[3]
+    }
+    set color3(v: number[]) {
+        this.data[this.offset + 5] = v[0]
+        this.data[this.offset + 6] = v[1]
+        this.data[this.offset + 7] = v[2]
+    }
+    set alpha(v: number) {
+        this.data[this.offset + 8] = v
+    }
 	// GLfloat pos[3];
 	// GLfloat texCoord[2];
 	// GLfloat color[4];
-    data: Float32Array
+    private data: Float32Array
+    private offset: number
+
+    constructor(data: Float32Array, offset: number) {
+        this.data = data 
+        this.offset = offset
+    }
+
 }
 
 
@@ -1084,7 +1136,7 @@ async function LoadMD2(gl: WebGL2RenderingContext, buffer: ArrayBuffer, name: st
 
 	/* load the glcmds */
     mod.glcmds = new Int32Array(mod.header.num_glcmds);
-	for (let i = 0; i < mod.header.num_frames; i++) {
+	for (let i = 0; i < mod.header.num_glcmds; i++) {
         mod.glcmds[i] = view.getInt32(mod.header.ofs_glcmds + i * 4, true);
 	}
 	// if (poutcmd[pheader->num_glcmds-1] != 0)

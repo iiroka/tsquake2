@@ -89,6 +89,18 @@ export class entity_t {
 	}
 }
 
+export class dlight_t  {
+	origin = [0,0,0]
+	color = [0,0,0]
+	intensity = 0
+}
+
+
+export class particle_t {
+	origin = [0,0,0]
+	color = 0
+	alpha = 0
+}
 
 export class lightstyle_t {
 	rgb = [0,0,0] /* 0.0 - 2.0 */
@@ -116,11 +128,9 @@ export class refdef_t {
 	// int			num_entities;
 	entities: entity_t[]
 
-	// int			num_dlights; // <= 32 (MAX_DLIGHTS)
-	// dlight_t	*dlights;
+	dlights: dlight_t[]
 
-	// int			num_particles;
-	// particle_t	*particles;
+	particles: particle_t[]
 }
 
 //
@@ -165,23 +175,23 @@ export interface refexport_t {
 	// are flood filled to eliminate mip map edge errors, and pics have
 	// an implicit "pics/" prepended to the name. (a pic name that starts with a
 	// slash will not use the "pics/" prefix or the ".pcx" postfix)
-	BeginRegistration(map: string): Promise<any>
+	BeginRegistration(map: string): Promise<void>
 	RegisterModel(name: string): Promise<object>
 	RegisterSkin(name: string): Promise<object>
 
-	// void	(EXPORT *SetSky) (char *name, float rotate, vec3_t axis);
+	SetSky(name: string, rotate: number, axis: number[]): Promise<void>
 	// void	(EXPORT *EndRegistration) (void);
 
-	RenderFrame(fd: refdef_t): Promise<any>;
+	RenderFrame(fd: refdef_t): Promise<void>;
 
-	DrawFindPic(name: string): Promise<any>
+	DrawFindPic(name: string): Promise<void>
 
 	DrawGetPicSize(name: string): Promise<number[]>	// will return 0 0 if not found
-	DrawPicScaled(x: number, y: number, pic: string, factor: number): Promise<any>
+	DrawPicScaled(x: number, y: number, pic: string, factor: number): Promise<void>
 	DrawStretchPic (x: number, y: number, w: number, h: number, name: string): Promise<any>
-	DrawCharScaled(x: number, y: number, num: number, scale: number): any
+	DrawCharScaled(x: number, y: number, num: number, scale: number): void
 	// void	(EXPORT *DrawTileClear) (int x, int y, int w, int h, char *name);
-	// void	(EXPORT *DrawFill) (int x, int y, int w, int h, int c);
+	DrawFill(x: number, y: number, w: number, h: number, c: number): void
 	// void	(EXPORT *DrawFadeScreen) (void);
 
 	// // Draw images for cinematic rendering (which can have a different palette). Note that calls
@@ -191,7 +201,7 @@ export interface refexport_t {
 	// ** video mode and refresh state management entry points
 	// */
 	// void	(EXPORT *SetPalette)( const unsigned char *palette);	// NULL = game palette
-	BeginFrame( camera_separation: number ): any
+	BeginFrame( camera_separation: number ): void
 	EndFrame(): any
 	// qboolean	(EXPORT *EndWorldRenderpass) (void); // finish world rendering, apply postprocess and switch to UI render pass
 

@@ -29,6 +29,7 @@ import { clc_ops_e } from "../common/common";
 import { FS_LoadFile } from "../common/filesystem";
 import { connstate_t } from "./client";
 import { cl, cls } from "./cl_main";
+import { SCR_EndLoadingPlaque } from "./cl_screen";
 
 export function SCR_FinishCinematic() {
     console.log("SCR_FinishCinematic")
@@ -59,7 +60,7 @@ export async function SCR_PlayCinematic(arg: string) {
 	// 	SCR_LoadPCX(name, &cin.pic, &palette, &cin.width, &cin.height);
 	// 	cl.cinematicframe = -1;
 	// 	cl.cinematictime = 1;
-	// 	SCR_EndLoadingPlaque();
+		SCR_EndLoadingPlaque();
 	// 	cls.state = ca_active;
 
 	// 	if (!cin.pic)
@@ -85,7 +86,7 @@ export async function SCR_PlayCinematic(arg: string) {
 	}
     cl.cinematic_buf = new Uint8Array(buf)
 
-	// SCR_EndLoadingPlaque();
+	SCR_EndLoadingPlaque();
 
 	cls.state = connstate_t.ca_active;
 

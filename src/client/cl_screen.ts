@@ -26,9 +26,9 @@
  */
 import * as SHARED from "../common/shared"
 import { Cvar_Get, Cvar_Set } from "../common/cvar"
-import { Com_Printf, Sys_Milliseconds } from "../common/clientserver"
-import { R_EndFrame, R_BeginFrame, Draw_GetPicSize, Draw_PicScaled, Draw_FindPic, viddef } from "./vid"
-import { con, Con_DrawConsole, Con_CheckResize } from "./cl_console"
+import { Com_Error, Com_Printf, Sys_Milliseconds } from "../common/clientserver"
+import { R_EndFrame, R_BeginFrame, Draw_GetPicSize, Draw_PicScaled, Draw_FindPic, viddef, Draw_Fill } from "./vid"
+import { con, Con_DrawConsole, Con_CheckResize, DrawStringScaled } from "./cl_console"
 import { cls, cl } from "./cl_main"
 import { M_Draw } from "./menu/menu"
 import { Cmd_AddCommand } from "../common/cmdparser"
@@ -144,7 +144,7 @@ async function SCR_DrawConsole() {
 	if ((cls.state != connstate_t.ca_active) || !cl.refresh_prepped) {
 		/* connected, but can't render */
 		Con_DrawConsole(0.5);
-		// Draw_Fill(0, viddef.height / 2, viddef.width, viddef.height / 2, 0);
+		Draw_Fill(0, viddef.height / 2, viddef.width, viddef.height / 2, 0);
 		return;
 	}
 
@@ -161,7 +161,7 @@ async function SCR_DrawConsole() {
 	// }
 }
 
-async function SCR_BeginLoadingPlaque() {
+export async function SCR_BeginLoadingPlaque() {
 	// S_StopAllSounds();
 	// cl.sound_prepped = false; /* don't play ambients */
 
@@ -200,7 +200,7 @@ async function SCR_BeginLoadingPlaque() {
 
 	// SCR_StopCinematic();
 	cls.disable_screen = Sys_Milliseconds();
-	// cls.disable_servercount = cl.servercount;
+	cls.disable_servercount = cl.servercount;
 }
 
 export function SCR_EndLoadingPlaque() {
@@ -228,6 +228,56 @@ const ICON_WIDTH = 24
 const ICON_HEIGHT = 24
 const CHAR_WIDTH = 16
 const ICON_SPACE = 8
+
+async function SCR_DrawFieldScaled(x: number, y: number, color: number, width: number, value: number, factor: number)
+{
+	// char num[16], *ptr;
+	// int l;
+	// int frame;
+
+	if (width < 1)
+	{
+		return;
+	}
+
+	/* draw number string */
+	if (width > 5)
+	{
+		width = 5;
+	}
+
+
+	let num = `${value}`
+	let l = num.length
+
+	if (l > width)
+	{
+		l = width;
+	}
+
+	x += (2 + CHAR_WIDTH * (width - l)) * factor;
+
+	for (let i =  0; i < l; i++) {
+		let frame = 0
+		if (num[i] == '-')
+		{
+			frame = STAT_MINUS;
+		}
+
+		else
+		{
+			frame = num.charCodeAt(i) - 0x30;
+		}
+
+		Draw_PicScaled(x, y, sb_nums[color][frame], factor);
+		x += CHAR_WIDTH*factor;
+	}
+}
+
+async function SCR_DrawField(x: number, y: number, color: number, width: number, value: number)
+{
+	await SCR_DrawFieldScaled(~~x, ~~y, ~~color, ~~width, ~~value, 1.0);
+}
 
 
 /*
@@ -257,6 +307,383 @@ export async function SCR_TouchPics() {
 	// }
 }
 
+async function SCR_ExecuteLayoutString(s: string)
+{
+	// int x, y;
+	// int value;
+	// char *token;
+	// int width;
+	// int index;
+	// clientinfo_t *ci;
+
+	// float scale = SCR_GetHUDScale();
+	const scale = 1.0
+
+	if ((cls.state != connstate_t.ca_active) || !cl.refresh_prepped)
+	{
+		return;
+	}
+
+	if (!s)
+	{
+		return;
+	}
+
+	let x = 0;
+	let y = 0;
+	let r = { token: "", index: 0}
+
+	while (r.index >= 0 && r.index < s.length)
+	{
+		r = SHARED.COM_Parse(s, r.index)
+		if (r.index < 0) break;
+
+		if (r.token == "xl") {
+			r = SHARED.COM_Parse(s, r.index)
+			x = ~~(scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "xr") {
+			r = SHARED.COM_Parse(s, r.index)
+			x = viddef.width + ~~(scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "xv") {
+			r = SHARED.COM_Parse(s, r.index)
+			x = ~~(viddef.width / 2 - scale * 160 + scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "yt") {
+			r = SHARED.COM_Parse(s, r.index)
+			y = ~~(scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "yb") {
+			r = SHARED.COM_Parse(s, r.index)
+			y = ~~(viddef.height + scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "yv") {
+			r = SHARED.COM_Parse(s, r.index)
+			y = ~~(viddef.height / 2 - scale*120 + scale * parseInt(r.token))
+			continue
+		}
+
+		if (r.token == "pic")
+		{
+			/* draw a pic from a stat number */
+			r = SHARED.COM_Parse(s, r.index);
+			let index = parseInt(r.token)
+
+			if ((index < 0) || (index >= cl.frame.playerstate.stats.length))
+			{
+				Com_Error(SHARED.ERR_DROP, `bad stats index ${index} (0x${index.toString(16)})`);
+			}
+
+			let value = cl.frame.playerstate.stats[index];
+
+			if (value >= SHARED.MAX_IMAGES)
+			{
+				Com_Error(SHARED.ERR_DROP, "Pic >= MAX_IMAGES");
+			}
+
+			if (cl.configstrings[SHARED.CS_IMAGES + value])
+			{
+				// SCR_AddDirtyPoint(x, y);
+				// SCR_AddDirtyPoint(x + 23*scale, y + 23*scale);
+				Draw_PicScaled(x, y, cl.configstrings[SHARED.CS_IMAGES + value], scale);
+			}
+
+			continue;
+		}
+
+	// 	if (!strcmp(token, "client"))
+	// 	{
+	// 		/* draw a deathmatch client block */
+	// 		int score, ping, time;
+
+	// 		token = COM_Parse(&s);
+	// 		x = viddef.width / 2 - scale*160 + scale*(int)strtol(token, (char **)NULL, 10);
+	// 		token = COM_Parse(&s);
+	// 		y = viddef.height / 2 - scale*120 + scale*(int)strtol(token, (char **)NULL, 10);
+	// 		SCR_AddDirtyPoint(x, y);
+	// 		SCR_AddDirtyPoint(x + scale*159, y + scale*31);
+
+	// 		token = COM_Parse(&s);
+	// 		value = (int)strtol(token, (char **)NULL, 10);
+
+	// 		if ((value >= MAX_CLIENTS) || (value < 0))
+	// 		{
+	// 			Com_Error(ERR_DROP, "client >= MAX_CLIENTS");
+	// 		}
+
+	// 		ci = &cl.clientinfo[value];
+
+	// 		token = COM_Parse(&s);
+	// 		score = (int)strtol(token, (char **)NULL, 10);
+
+	// 		token = COM_Parse(&s);
+	// 		ping = (int)strtol(token, (char **)NULL, 10);
+
+	// 		token = COM_Parse(&s);
+	// 		time = (int)strtol(token, (char **)NULL, 10);
+
+	// 		DrawAltStringScaled(x + scale*32, y, ci->name, scale);
+	// 		DrawAltStringScaled(x + scale*32, y + scale*8, "Score: ", scale);
+	// 		DrawAltStringScaled(x + scale*(32 + 7 * 8), y + scale*8, va("%i", score), scale);
+	// 		DrawStringScaled(x + scale*32, y + scale*16, va("Ping:  %i", ping), scale);
+	// 		DrawStringScaled(x + scale*32, y + scale*24, va("Time:  %i", time), scale);
+
+	// 		if (!ci->icon)
+	// 		{
+	// 			ci = &cl.baseclientinfo;
+	// 		}
+
+	// 		Draw_PicScaled(x, y, ci->iconname, scale);
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "ctf"))
+	// 	{
+	// 		/* draw a ctf client block */
+	// 		int score, ping;
+	// 		char block[80];
+
+	// 		token = COM_Parse(&s);
+	// 		x = viddef.width / 2 - scale*160 + scale*(int)strtol(token, (char **)NULL, 10);
+	// 		token = COM_Parse(&s);
+	// 		y = viddef.height / 2 - scale*120 + scale*(int)strtol(token, (char **)NULL, 10);
+	// 		SCR_AddDirtyPoint(x, y);
+	// 		SCR_AddDirtyPoint(x + scale*159, y + scale*31);
+
+	// 		token = COM_Parse(&s);
+	// 		value = (int)strtol(token, (char **)NULL, 10);
+
+	// 		if ((value >= MAX_CLIENTS) || (value < 0))
+	// 		{
+	// 			Com_Error(ERR_DROP, "client >= MAX_CLIENTS");
+	// 		}
+
+	// 		ci = &cl.clientinfo[value];
+
+	// 		token = COM_Parse(&s);
+	// 		score = (int)strtol(token, (char **)NULL, 10);
+
+	// 		token = COM_Parse(&s);
+	// 		ping = (int)strtol(token, (char **)NULL, 10);
+
+	// 		if (ping > 999)
+	// 		{
+	// 			ping = 999;
+	// 		}
+
+	// 		sprintf(block, "%3d %3d %-12.12s", score, ping, ci->name);
+
+	// 		if (value == cl.playernum)
+	// 		{
+	// 			DrawAltStringScaled(x, y, block, scale);
+	// 		}
+
+	// 		else
+	// 		{
+	// 			DrawStringScaled(x, y, block, scale);
+	// 		}
+
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "picn"))
+	// 	{
+	// 		/* draw a pic from a name */
+	// 		token = COM_Parse(&s);
+	// 		SCR_AddDirtyPoint(x, y);
+	// 		SCR_AddDirtyPoint(x + scale*23, y + scale*23);
+	// 		Draw_PicScaled(x, y, (char *)token, scale);
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "num"))
+	// 	{
+	// 		/* draw a number */
+	// 		token = COM_Parse(&s);
+	// 		width = (int)strtol(token, (char **)NULL, 10);
+	// 		token = COM_Parse(&s);
+	// 		value = cl.frame.playerstate.stats[(int)strtol(token, (char **)NULL, 10)];
+	// 		SCR_DrawFieldScaled(x, y, 0, width, value, scale);
+	// 		continue;
+	// 	}
+
+		if (r.token == "hnum") {
+			/* health number */
+			let color = 0;
+
+			let value = cl.frame.playerstate.stats[SHARED.STAT_HEALTH];
+
+			if (value > 25)
+			{
+				color = 0;  /* green */
+			}
+			else if (value > 0)
+			{
+				color = (cl.frame.serverframe >> 2) & 1; /* flash */
+			}
+			else
+			{
+				color = 1;
+			}
+
+			if (cl.frame.playerstate.stats[SHARED.STAT_FLASHES] & 1)
+			{
+				await Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, color, 3, value, scale);
+			continue;
+		}
+
+		if (r.token == "anum")
+		{
+			/* ammo number */
+			let color = 0;
+
+			let value = cl.frame.playerstate.stats[SHARED.STAT_AMMO];
+
+			if (value > 5)
+			{
+				color = 0; /* green */
+			}
+			else if (value >= 0)
+			{
+				color = (cl.frame.serverframe >> 2) & 1; /* flash */
+			}
+			else
+			{
+				continue; /* negative number = don't show */
+			}
+
+			if (cl.frame.playerstate.stats[SHARED.STAT_FLASHES] & 4)
+			{
+				Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, color, 3, value, scale);
+			continue;
+		}
+
+		if (r.token == "rnum")
+		{
+			/* armor number */
+			let value = cl.frame.playerstate.stats[SHARED.STAT_ARMOR];
+			if (value < 1) {
+				continue;
+			}
+
+			if (cl.frame.playerstate.stats[SHARED.STAT_FLASHES] & 2) {
+				Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, 0, 3, value, scale);
+			continue;
+		}
+
+		if (r.token == "stat_string")
+		{
+			r = SHARED.COM_Parse(s, r.index);
+			let index = parseInt(r.token)
+
+			if ((index < 0) || (index >= SHARED.MAX_CONFIGSTRINGS)) {
+				Com_Error(SHARED.ERR_DROP, "Bad stat_string index");
+			}
+
+			index = cl.frame.playerstate.stats[index];
+
+			if ((index < 0) || (index >= SHARED.MAX_CONFIGSTRINGS))
+			{
+				Com_Error(SHARED.ERR_DROP, "Bad stat_string index");
+			}
+
+			DrawStringScaled(x, y, cl.configstrings[index], scale);
+			continue;
+		}
+
+	// 	if (!strcmp(token, "cstring"))
+	// 	{
+	// 		token = COM_Parse(&s);
+	// 		DrawHUDStringScaled(token, x, y, 320, 0, scale); // FIXME: or scale 320 here?
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "string"))
+	// 	{
+	// 		token = COM_Parse(&s);
+	// 		DrawStringScaled(x, y, token, scale);
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "cstring2"))
+	// 	{
+	// 		token = COM_Parse(&s);
+	// 		DrawHUDStringScaled(token, x, y, 320, 0x80, scale); // FIXME: or scale 320 here?
+	// 		continue;
+	// 	}
+
+	// 	if (!strcmp(token, "string2"))
+	// 	{
+	// 		token = COM_Parse(&s);
+	// 		DrawAltStringScaled(x, y, token, scale);
+	// 		continue;
+	// 	}
+
+		if (r.token == "if")
+		{
+			r = SHARED.COM_Parse(s, r.index)
+			let value = cl.frame.playerstate.stats[parseInt(r.token)];
+
+			if (!value)
+			{
+				/* skip to endif */
+				while (r.index >= 0  && r.index < s.length && r.token != "endif") {
+					r = SHARED.COM_Parse(s, r.index)
+				}
+			}
+
+			continue;
+		}
+		if (r.token == "endif") {
+			continue
+		}
+		console.log(r.token)
+	}
+}
+
+
+/*
+ * The status bar is a small layout program that
+ * is based on the stats array
+ */
+async function SCR_DrawStats()
+{
+	await SCR_ExecuteLayoutString(cl.configstrings[SHARED.CS_STATUSBAR]);
+}
+
+const STAT_LAYOUTS = 13
+
+async function SCR_DrawLayout()
+{
+	if (!cl.frame.playerstate.stats[STAT_LAYOUTS])
+	{
+		return;
+	}
+
+	await SCR_ExecuteLayoutString(cl.layout);
+}
+
+
 // ----
 /*
  * This is called every frame, and can also be called
@@ -267,6 +694,7 @@ export async function SCR_UpdateScreen() {
 	// int i;
 	// float separation[2] = {0, 0};
 	// float scale = SCR_GetMenuScale();
+	const scale = 1.0
 
 	/* if the screen is disabled (loading plaque is
 	   up, or vid mode changing) do nothing at all */
@@ -304,9 +732,7 @@ export async function SCR_UpdateScreen() {
 		R_BeginFrame(separation[i]);
 
 		if (scr_draw_loading == 2) {
-	// 		/* loading plaque over black screen */
-	// 		int w, h;
-
+			/* loading plaque over black screen */
 	// 		R_EndWorldRenderpass();
 	// 		if(i == 0){
 	// 			R_SetPalette(NULL);
@@ -316,8 +742,8 @@ export async function SCR_UpdateScreen() {
 	// 			scr_draw_loading = false;
 	// 		}
 
-	// 		Draw_GetPicSize(&w, &h, "loading");
-	// 		Draw_PicScaled((viddef.width - w * scale) / 2, (viddef.height - h * scale) / 2, "loading", scale);
+			let r = await Draw_GetPicSize("loading")
+			await Draw_PicScaled((viddef.width - r[0] * scale) / 2, (viddef.height - r[1] * scale) / 2, "loading", scale);
 		// }
 
 		/* if a cinematic is supposed to be running,
@@ -364,22 +790,22 @@ export async function SCR_UpdateScreen() {
 			/* do 3D refresh drawing, and then update the screen */
 			SCR_CalcVrect();
 
-	// 		/* clear any dirty part of the background */
+			/* clear any dirty part of the background */
 	// 		SCR_TileClear();
 
 			await V_RenderView(separation[i]);
 
-	// 		SCR_DrawStats();
+			await SCR_DrawStats();
 
-	// 		if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
-	// 		{
-	// 			SCR_DrawLayout();
-	// 		}
+			if (cl.frame.playerstate.stats[SHARED.STAT_LAYOUTS] & 1)
+			{
+				await SCR_DrawLayout();
+			}
 
-	// 		if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 2)
-	// 		{
-	// 			CL_DrawInventory();
-	// 		}
+			if (cl.frame.playerstate.stats[SHARED.STAT_LAYOUTS] & 2)
+			{
+				// CL_DrawInventory();
+			}
 
 	// 		SCR_DrawNet();
 	// 		SCR_CheckDrawCenterString();

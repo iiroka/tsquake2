@@ -28,7 +28,7 @@ import { Cmd_AddCommand } from "./cmdparser"
 import { Com_Printf } from "./clientserver";
 
 let cvar_vars: Map<string, SHARED.cvar_t> = new Map();
-let userinfo_modified = false
+export let userinfo_modified = false
 
 function Cvar_FindVar(var_name: string): SHARED.cvar_t {
 
@@ -45,6 +45,17 @@ function Cvar_FindVar(var_name: string): SHARED.cvar_t {
 
 	return cvar_vars.get(var_name);
 }
+
+export function Cvar_VariableBool(var_name: string): boolean {
+
+	let v = Cvar_FindVar(var_name);
+	if (v == null) {
+		return false;
+	}
+
+	return v.bool;
+}
+
 
 export function Cvar_VariableString(var_name: string): string {
 

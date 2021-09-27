@@ -42,10 +42,10 @@ export function WebGL_SetDefaultState(gl: WebGL2RenderingContext) {
 
 	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	// // TODO: gl1_texturealphamode?
+	// TODO: gl1_texturealphamode?
 	WebGL_TextureMode(gl, gl_texturemode.string);
-	// //R_TextureAlphaMode(gl1_texturealphamode->string);
-	// //R_TextureSolidMode(gl1_texturesolidmode->string);
+	//R_TextureAlphaMode(gl1_texturealphamode->string);
+	//R_TextureSolidMode(gl1_texturesolidmode->string);
 
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl_filter_min);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl_filter_max);

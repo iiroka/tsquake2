@@ -210,6 +210,36 @@ export function HMM_Mat4d(Diagonal: number): Float32Array {
     return Result;
 }
 
+export function HMM_LengthSquaredVec3(A: Float32Array): number {
+    return HMM_DotVec3(A, A);
+}
+
+
+export function HMM_LengthVec3(A: Float32Array): number {
+    return Math.sqrt(HMM_LengthSquaredVec3(A));
+}
+
+export function HMM_DotVec3(VecOne: Float32Array, VecTwo: Float32Array): number {
+    return (VecOne[0] * VecTwo[0]) + (VecOne[1] * VecTwo[1]) + (VecOne[2] * VecTwo[2]);
+}
+
+
+export function HMM_NormalizeVec3(A: Float32Array): Float32Array {
+    let Result = new Float32Array(3);
+
+    const VectorLength = HMM_LengthVec3(A);
+    
+    /* NOTE(kiljacken): We need a zero check to not divide-by-zero */
+    if (VectorLength != 0.0)
+    {
+        Result[0] = A[0] * (1.0 / VectorLength);
+        Result[1] = A[1] * (1.0 / VectorLength);
+        Result[2] = A[2] * (1.0 / VectorLength);
+    }
+    
+    return (Result);
+}
+
 
 /*
  * Common graphics transformations
@@ -258,4 +288,28 @@ export function HMM_MultiplyMat4(Left: Float32Array, Right: Float32Array): Float
     }
 
     return Result;
+}
+
+export function HMM_Rotate(Angle: number, Axis: Float32Array): Float32Array {
+    let Result = HMM_Mat4d(1.0);
+    
+    Axis = HMM_NormalizeVec3(Axis);
+    
+    const SinTheta = Math.sin(HMM_ToRadians(Angle));
+    const CosTheta = Math.cos(HMM_ToRadians(Angle));
+    const CosValue = 1.0 - CosTheta;
+    
+    Result[0*4 + 0] = (Axis[0] * Axis[0] * CosValue) + CosTheta;
+    Result[0*4 + 1] = (Axis[0] * Axis[1] * CosValue) + (Axis[2] * SinTheta);
+    Result[0*4 + 2] = (Axis[0] * Axis[2] * CosValue) - (Axis[1] * SinTheta);
+    
+    Result[1*4 + 0] = (Axis[1] * Axis[0] * CosValue) - (Axis[2] * SinTheta);
+    Result[1*4 + 1] = (Axis[1] * Axis[1] * CosValue) + CosTheta;
+    Result[1*4 + 2] = (Axis[1] * Axis[2] * CosValue) + (Axis[0] * SinTheta);
+    
+    Result[2*4 + 0] = (Axis[2] * Axis[0] * CosValue) + (Axis[1] * SinTheta);
+    Result[2*4 + 1] = (Axis[2] * Axis[1] * CosValue) - (Axis[0] * SinTheta);
+    Result[2*4 + 2] = (Axis[2] * Axis[2] * CosValue) + CosTheta;
+    
+    return (Result);
 }

@@ -37,13 +37,14 @@ import { Key_Update } from "./cl_keyboard"
 import { Cvar_Get, Cvar_VariableString } from "../common/cvar"
 import { Netchan_OutOfBandPrint } from "../common/netchan"
 import { CL_ReadPackets, CL_CheckForResend, CL_ForwardToServer_f, CL_Changing_f, CL_Reconnect_f, CL_Disconnect_f } from "./cl_network"
-import { CL_RefreshCmd, CL_RefreshMove, CL_SendCmd } from "./cl_input"
+import { CL_InitInput, CL_RefreshCmd, CL_RefreshMove, CL_SendCmd } from "./cl_input"
 import { CL_ResetPrecacheCheck, CL_StartPrecache, CL_RequestNextDownload } from "./cl_download"
 import { CL_InitHTTPDownloads, CL_RunHTTPDownloads } from "./download"
 import { CL_PrepRefresh } from "./cl_view"
 import { CL_ClearEffects } from "./cl_effects"
-import { CL_RunLightStyles } from "./cl_light"
+import { CL_RunDLights, CL_RunLightStyles } from "./cl_light"
 import { CL_PredictMovement } from "./cl_prediction"
+import { CM_LoadMap } from "../common/collision"
 
 export let cl = new client_state_t();
 export let cls = new client_static_t();
@@ -54,6 +55,15 @@ export let cl_paused: SHARED.cvar_t
 export let cl_vwep: SHARED.cvar_t
 export let cl_predict: SHARED.cvar_t
 export let cl_kickangles: SHARED.cvar_t
+export let cl_upspeed: SHARED.cvar_t
+export let cl_forwardspeed: SHARED.cvar_t
+export let cl_sidespeed: SHARED.cvar_t
+export let cl_yawspeed: SHARED.cvar_t
+export let cl_pitchspeed: SHARED.cvar_t
+export let cl_anglespeedkey: SHARED.cvar_t
+export let cl_lightlevel: SHARED.cvar_t
+export let cl_showclamp: SHARED.cvar_t
+export let horplus: SHARED.cvar_t
 
 export let cl_entities: centity_t[] = new Array<centity_t>(SHARED.MAX_EDICTS);
 
@@ -86,9 +96,8 @@ export function CL_ClearState() {
 async function CL_Precache_f(args: string[]) {
 	/* Yet another hack to let old demos work */
 	if (args.length < 2) {
-		// unsigned map_checksum;    /* for detecting cheater maps */
-
-		// CM_LoadMap(cl.configstrings[CS_MODELS + 1], true, &map_checksum);
+		let map_checksum = [0]    /* for detecting cheater maps */
+		await CM_LoadMap(cl.configstrings[SHARED.CS_MODELS + 1], true, map_checksum);
 		// CL_RegisterSounds();
 		await CL_PrepRefresh();
 		return;
@@ -107,7 +116,7 @@ function CL_InitLocal() {
 	for (let i = 0; i < cl_parse_entities.length; i++) 
 		cl_parse_entities[i] = new SHARED.entity_state_t()
 
-// 	CL_InitInput();
+	CL_InitInput();
 
 	/* register our variables */
     server_address = Cvar_Get("server_address", "http://localhost:8081", SHARED.CVAR_ARCHIVE);
@@ -124,18 +133,18 @@ function CL_InitLocal() {
 	cl_predict = Cvar_Get("cl_predict", "1", 0);
 // 	cl_showfps = Cvar_Get("cl_showfps", "0", CVAR_ARCHIVE);
 
-// 	cl_upspeed = Cvar_Get("cl_upspeed", "200", 0);
-// 	cl_forwardspeed = Cvar_Get("cl_forwardspeed", "200", 0);
-// 	cl_sidespeed = Cvar_Get("cl_sidespeed", "200", 0);
-// 	cl_yawspeed = Cvar_Get("cl_yawspeed", "140", 0);
-// 	cl_pitchspeed = Cvar_Get("cl_pitchspeed", "150", 0);
-// 	cl_anglespeedkey = Cvar_Get("cl_anglespeedkey", "1.5", 0);
+	cl_upspeed = Cvar_Get("cl_upspeed", "200", 0);
+	cl_forwardspeed = Cvar_Get("cl_forwardspeed", "200", 0);
+	cl_sidespeed = Cvar_Get("cl_sidespeed", "200", 0);
+	cl_yawspeed = Cvar_Get("cl_yawspeed", "140", 0);
+	cl_pitchspeed = Cvar_Get("cl_pitchspeed", "150", 0);
+	cl_anglespeedkey = Cvar_Get("cl_anglespeedkey", "1.5", 0);
 
 // 	cl_run = Cvar_Get("cl_run", "0", CVAR_ARCHIVE);
 
 	cl_shownet = Cvar_Get("cl_shownet", "0", 0);
 // 	cl_showmiss = Cvar_Get("cl_showmiss", "0", 0);
-// 	cl_showclamp = Cvar_Get("showclamp", "0", 0);
+	cl_showclamp = Cvar_Get("showclamp", "0", 0);
 // 	cl_timeout = Cvar_Get("cl_timeout", "120", 0);
 	cl_paused = Cvar_Get("paused", "0", 0);
 // 	cl_loadpaused = Cvar_Get("cl_loadpaused", "1", CVAR_ARCHIVE);
@@ -147,7 +156,7 @@ function CL_InitLocal() {
 // 	rcon_client_password = Cvar_Get("rcon_password", "", 0);
 // 	rcon_address = Cvar_Get("rcon_address", "", 0);
 
-// 	cl_lightlevel = Cvar_Get("r_lightlevel", "0", 0);
+	cl_lightlevel = Cvar_Get("r_lightlevel", "0", 0);
 // 	cl_r1q2_lightstyle = Cvar_Get("cl_r1q2_lightstyle", "1", CVAR_ARCHIVE);
 // 	cl_limitsparksounds = Cvar_Get("cl_limitsparksounds", "0", CVAR_ARCHIVE);
 
@@ -158,7 +167,7 @@ function CL_InitLocal() {
 // 	msg = Cvar_Get("msg", "1", CVAR_USERINFO | CVAR_ARCHIVE);
 // 	hand = Cvar_Get("hand", "0", CVAR_USERINFO | CVAR_ARCHIVE);
 // 	fov = Cvar_Get("fov", "90", CVAR_USERINFO | CVAR_ARCHIVE);
-// 	horplus = Cvar_Get("horplus", "1", CVAR_ARCHIVE);
+	horplus = Cvar_Get("horplus", "1", SHARED.CVAR_ARCHIVE);
 // 	windowed_mouse = Cvar_Get("windowed_mouse", "1", CVAR_USERINFO | CVAR_ARCHIVE);
 // 	gender = Cvar_Get("gender", "male", CVAR_USERINFO | CVAR_ARCHIVE);
 // 	gender_auto = Cvar_Get("gender_auto", "1", CVAR_ARCHIVE);
@@ -329,7 +338,7 @@ export async function CL_Frame(msec:  number) {
 // 		S_Update(cl.refdef.vieworg, cl.v_forward, cl.v_right, cl.v_up);
 
 		/* advance local effects for next frame */
-// 		CL_RunDLights();
+		CL_RunDLights();
 		CL_RunLightStyles();
 // 		SCR_RunCinematic();
 // 		SCR_RunConsole();
