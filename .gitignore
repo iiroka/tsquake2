@@ -1,0 +1,4 @@
+node_modules
+baseq2/pics
+dist/
+package-lock.json
